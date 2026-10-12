@@ -1,0 +1,19 @@
+{
+  "name": "Drug X US Launch",
+  "objective": "Estimate launch outcomes under competitive responses",
+  "time_horizon": 8,
+  "initial_state": {
+    "drug_price": 100000,
+    "competitor_price": 90000,
+    "efficacy_advantage": 0.15,
+    "market_share": 0,
+    "addressable_patients": 1000000
+  },
+  "agents": [
+    {"id":"company","name":"Company","type":"company","objective":"maximize sustainable adoption","available_actions":["launch","maintain_promotion"]},
+    {"id":"competitor","name":"Competitor","type":"competitor","objective":"protect_market_share","constraints":{"min_price":50000},"available_actions":["aggressive_price_cut","increase_promotion","maintain_strategy","delay_response"]},
+    {"id":"payer","name":"Payer","type":"payer","objective":"balance access and affordability","available_actions":["restricted_access","standard_access","favorable_access"]},
+    {"id":"physician","name":"Physician","type":"physician","objective":"select effective accessible therapy","available_actions":["slow_adoption","adopt","maintain_adoption"]},
+    {"id":"patient","name":"Patient","type":"patient","objective":"access suitable treatment","available_actions":[]}
+  ]
+}

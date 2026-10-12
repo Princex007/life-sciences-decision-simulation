@@ -1,0 +1,503 @@
+{
+  "metadata": {
+    "id": "local-5agent-2round-smoke",
+    "name": "Local 5-Agent 2-Round Simulation",
+    "description": "Sequential 5-agent decision loop across 2 rounds using emergent market share.",
+    "domain": "life_sciences"
+  },
+  "initial_world_state": {
+    "time": 0,
+    "variables": {
+      "company_launch_status": "pre_launch",
+      "drug_price": 1000,
+      "company_promotion": 1.0,
+      "competitor_price": 950,
+      "competitor_promotion": 1.0,
+      "payer_access": 0.70,
+      "physician_prescribing_rate": 0.10,
+      "patient_adherence_rate": 0.60,
+      "market_share": 0.0399,
+      "addressable_patients": 100000,
+      "diagnosis_rate": 0.80,
+      "treatment_rate": 0.75
+    }
+  },
+  "agents": [
+    {
+      "id": "company",
+      "name": "Company",
+      "type": "company",
+      "objective": "Launch product and optimize market adoption through pricing and commercial investment.",
+      "observable_state": [
+        "company_launch_status",
+        "drug_price",
+        "competitor_price",
+        "company_promotion",
+        "payer_access",
+        "market_share"
+      ],
+      "available_actions": [
+        "launch_at_premium_price",
+        "launch_at_discount_price",
+        "expand_marketing_campaign",
+        "offer_rebate_discount"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "simulation_start",
+            "plausible_actions": ["launch_at_discount_price", "launch_at_premium_price"],
+            "reason": "Round 1 launch pricing decision."
+          },
+          {
+            "when_event": "round_two_start",
+            "plausible_actions": ["expand_marketing_campaign", "offer_rebate_discount"],
+            "reason": "Round 2 commercial investment decision."
+          }
+        ],
+        "default_actions": ["launch_at_discount_price", "launch_at_premium_price"]
+      }
+    },
+    {
+      "id": "competitor",
+      "name": "Competitor",
+      "type": "competitor",
+      "objective": "Defend market position against company entry through pricing or promotion.",
+      "observable_state": [
+        "company_launch_status",
+        "drug_price",
+        "competitor_price",
+        "competitor_promotion",
+        "market_share"
+      ],
+      "available_actions": [
+        "cut_competitor_price",
+        "increase_competitor_promotion",
+        "deepen_competitor_discount",
+        "launch_competitor_ad_blitz"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "company_r1_action",
+            "plausible_actions": ["cut_competitor_price", "increase_competitor_promotion"],
+            "reason": "Round 1 defense against company launch."
+          },
+          {
+            "when_event": "company_r2_action",
+            "plausible_actions": ["deepen_competitor_discount", "launch_competitor_ad_blitz"],
+            "reason": "Round 2 defense against company expansion."
+          }
+        ],
+        "default_actions": ["cut_competitor_price", "increase_competitor_promotion"]
+      }
+    },
+    {
+      "id": "payer",
+      "name": "Payer",
+      "type": "payer",
+      "objective": "Manage healthcare budget and determine formulary tier access.",
+      "observable_state": [
+        "company_launch_status",
+        "drug_price",
+        "competitor_price",
+        "payer_access",
+        "market_share"
+      ],
+      "available_actions": [
+        "restrict_access",
+        "standard_access",
+        "expand_access_tier",
+        "tighten_access_controls"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "competitor_r1_action",
+            "plausible_actions": ["restrict_access", "standard_access"],
+            "reason": "Round 1 formulary access review."
+          },
+          {
+            "when_event": "competitor_r2_action",
+            "plausible_actions": ["expand_access_tier", "tighten_access_controls"],
+            "reason": "Round 2 formulary access revision."
+          }
+        ],
+        "default_actions": ["restrict_access", "standard_access"]
+      }
+    },
+    {
+      "id": "physician",
+      "name": "Physician",
+      "type": "physician",
+      "objective": "Prescribe therapy based on patient affordability and formulary access.",
+      "observable_state": [
+        "payer_access",
+        "drug_price",
+        "physician_prescribing_rate",
+        "market_share"
+      ],
+      "available_actions": [
+        "expand_prescribing",
+        "conservative_prescribing",
+        "scale_first_line_use",
+        "maintain_selective_use"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "payer_r1_action",
+            "plausible_actions": ["expand_prescribing", "conservative_prescribing"],
+            "reason": "Round 1 clinical prescribing response."
+          },
+          {
+            "when_event": "payer_r2_action",
+            "plausible_actions": ["scale_first_line_use", "maintain_selective_use"],
+            "reason": "Round 2 clinical treatment update."
+          }
+        ],
+        "default_actions": ["expand_prescribing", "conservative_prescribing"]
+      }
+    },
+    {
+      "id": "patient",
+      "name": "Patient",
+      "type": "patient",
+      "objective": "Adhere to therapy based on cost, access, and doctor prescription.",
+      "observable_state": [
+        "payer_access",
+        "physician_prescribing_rate",
+        "patient_adherence_rate",
+        "market_share"
+      ],
+      "available_actions": [
+        "high_adherence",
+        "moderate_adherence",
+        "sustain_long_term_therapy",
+        "partial_treatment_compliance"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "physician_r1_action",
+            "plausible_actions": ["high_adherence", "moderate_adherence"],
+            "reason": "Round 1 patient initiation adherence."
+          },
+          {
+            "when_event": "physician_r2_action",
+            "plausible_actions": ["sustain_long_term_therapy", "partial_treatment_compliance"],
+            "reason": "Round 2 patient maintenance adherence."
+          }
+        ],
+        "default_actions": ["high_adherence", "moderate_adherence"]
+      }
+    }
+  ],
+  "action_definitions": [
+    {
+      "id": "launch_at_premium_price",
+      "name": "Launch at premium price",
+      "agent_id": "company",
+      "strategy": "premium_price_launch",
+      "description": "Position drug at premium price of 1100.",
+      "effects": [
+        {"variable": "company_launch_status", "operation": "set", "value": "launched"},
+        {"variable": "drug_price", "operation": "set", "value": 1100}
+      ],
+      "generated_events": [
+        {"event_type": "company_r1_action", "description": "Company launches at premium price."}
+      ]
+    },
+    {
+      "id": "launch_at_discount_price",
+      "name": "Launch at discount price",
+      "agent_id": "company",
+      "strategy": "discount_price_launch",
+      "description": "Position drug at competitive discount price of 850.",
+      "effects": [
+        {"variable": "company_launch_status", "operation": "set", "value": "launched"},
+        {"variable": "drug_price", "operation": "set", "value": 850}
+      ],
+      "generated_events": [
+        {"event_type": "company_r1_action", "description": "Company launches at discount price."}
+      ]
+    },
+    {
+      "id": "expand_marketing_campaign",
+      "name": "Expand marketing campaign",
+      "agent_id": "company",
+      "strategy": "marketing_expansion",
+      "description": "Increase commercial promotion spend adding 0.30.",
+      "effects": [
+        {"variable": "company_promotion", "operation": "add", "value": 0.30}
+      ],
+      "generated_events": [
+        {"event_type": "company_r2_action", "description": "Company expands marketing campaign."}
+      ]
+    },
+    {
+      "id": "offer_rebate_discount",
+      "name": "Offer rebate discount",
+      "agent_id": "company",
+      "strategy": "rebate_concession",
+      "description": "Offer contract rebates reducing effective drug price by 10%.",
+      "effects": [
+        {"variable": "drug_price", "operation": "multiply", "value": 0.90, "minimum": 500}
+      ],
+      "generated_events": [
+        {"event_type": "company_r2_action", "description": "Company offers rebate discount."}
+      ]
+    },
+    {
+      "id": "cut_competitor_price",
+      "name": "Cut competitor price",
+      "agent_id": "competitor",
+      "strategy": "price_defense_r1",
+      "description": "Reduce competitor price by 10%.",
+      "effects": [
+        {"variable": "competitor_price", "operation": "multiply", "value": 0.9, "minimum": 500}
+      ],
+      "generated_events": [
+        {"event_type": "competitor_r1_action", "description": "Competitor cuts price by 10%."}
+      ]
+    },
+    {
+      "id": "increase_competitor_promotion",
+      "name": "Increase competitor promotion",
+      "agent_id": "competitor",
+      "strategy": "promotion_defense_r1",
+      "description": "Boost marketing and promotional spend by 0.25.",
+      "effects": [
+        {"variable": "competitor_promotion", "operation": "add", "value": 0.25}
+      ],
+      "generated_events": [
+        {"event_type": "competitor_r1_action", "description": "Competitor increases promotion."}
+      ]
+    },
+    {
+      "id": "deepen_competitor_discount",
+      "name": "Deepen competitor discount",
+      "agent_id": "competitor",
+      "strategy": "price_defense_r2",
+      "description": "Further cut competitor price by 15%.",
+      "effects": [
+        {"variable": "competitor_price", "operation": "multiply", "value": 0.85, "minimum": 400}
+      ],
+      "generated_events": [
+        {"event_type": "competitor_r2_action", "description": "Competitor deepens price discount."}
+      ]
+    },
+    {
+      "id": "launch_competitor_ad_blitz",
+      "name": "Launch competitor ad blitz",
+      "agent_id": "competitor",
+      "strategy": "promotion_defense_r2",
+      "description": "Launch aggressive counter-promotional blitz adding 0.35 promotion.",
+      "effects": [
+        {"variable": "competitor_promotion", "operation": "add", "value": 0.35}
+      ],
+      "generated_events": [
+        {"event_type": "competitor_r2_action", "description": "Competitor launches promotional blitz."}
+      ]
+    },
+    {
+      "id": "restrict_access",
+      "name": "Restrict access",
+      "agent_id": "payer",
+      "strategy": "restricted_access_r1",
+      "description": "Restrict formulary access to 50%.",
+      "effects": [
+        {"variable": "payer_access", "operation": "set", "value": 0.50}
+      ],
+      "generated_events": [
+        {"event_type": "payer_r1_action", "description": "Payer restricts formulary access."}
+      ]
+    },
+    {
+      "id": "standard_access",
+      "name": "Standard access",
+      "agent_id": "payer",
+      "strategy": "standard_access_r1",
+      "description": "Provide standard formulary access at 80%.",
+      "effects": [
+        {"variable": "payer_access", "operation": "set", "value": 0.80}
+      ],
+      "generated_events": [
+        {"event_type": "payer_r1_action", "description": "Payer maintains standard access."}
+      ]
+    },
+    {
+      "id": "expand_access_tier",
+      "name": "Expand access tier",
+      "agent_id": "payer",
+      "strategy": "favorable_access_r2",
+      "description": "Expand formulary access to preferred tier at 90%.",
+      "effects": [
+        {"variable": "payer_access", "operation": "set", "value": 0.90}
+      ],
+      "generated_events": [
+        {"event_type": "payer_r2_action", "description": "Payer expands formulary tier."}
+      ]
+    },
+    {
+      "id": "tighten_access_controls",
+      "name": "Tighten access controls",
+      "agent_id": "payer",
+      "strategy": "tightened_access_r2",
+      "description": "Tighten prior authorizations reducing access to 40%.",
+      "effects": [
+        {"variable": "payer_access", "operation": "set", "value": 0.40}
+      ],
+      "generated_events": [
+        {"event_type": "payer_r2_action", "description": "Payer tightens prior authorizations."}
+      ]
+    },
+    {
+      "id": "expand_prescribing",
+      "name": "Expand prescribing",
+      "agent_id": "physician",
+      "strategy": "prescribing_expansion_r1",
+      "description": "Increase prescribing rate.",
+      "effects": [
+        {"variable": "physician_prescribing_rate", "operation": "add", "value": 0.15, "maximum": 0.95}
+      ],
+      "generated_events": [
+        {"event_type": "physician_r1_action", "description": "Physician increases adoption rate."}
+      ]
+    },
+    {
+      "id": "conservative_prescribing",
+      "name": "Conservative prescribing",
+      "agent_id": "physician",
+      "strategy": "prescribing_cautious_r1",
+      "description": "Prescribe conservatively given formulary and cost context.",
+      "effects": [
+        {"variable": "physician_prescribing_rate", "operation": "add", "value": 0.02, "maximum": 0.95}
+      ],
+      "generated_events": [
+        {"event_type": "physician_r1_action", "description": "Physician prescribes conservatively."}
+      ]
+    },
+    {
+      "id": "scale_first_line_use",
+      "name": "Scale first-line use",
+      "agent_id": "physician",
+      "strategy": "prescribing_scale_r2",
+      "description": "Scale product as first-line therapy across patient segments.",
+      "effects": [
+        {"variable": "physician_prescribing_rate", "operation": "add", "value": 0.20, "maximum": 0.95}
+      ],
+      "generated_events": [
+        {"event_type": "physician_r2_action", "description": "Physician scales first-line prescribing."}
+      ]
+    },
+    {
+      "id": "maintain_selective_use",
+      "name": "Maintain selective use",
+      "agent_id": "physician",
+      "strategy": "prescribing_selective_r2",
+      "description": "Maintain selective use restricted to high-need patients.",
+      "effects": [
+        {"variable": "physician_prescribing_rate", "operation": "add", "value": 0.05, "maximum": 0.95}
+      ],
+      "generated_events": [
+        {"event_type": "physician_r2_action", "description": "Physician maintains selective prescribing."}
+      ]
+    },
+    {
+      "id": "high_adherence",
+      "name": "High treatment adherence",
+      "agent_id": "patient",
+      "strategy": "adherence_high_r1",
+      "description": "Consistently adhere to therapy regimen.",
+      "effects": [
+        {"variable": "patient_adherence_rate", "operation": "add", "value": 0.15, "maximum": 0.95}
+      ],
+      "generated_events": [
+        {"event_type": "patient_r1_action", "description": "Patient shows high adherence."}
+      ]
+    },
+    {
+      "id": "moderate_adherence",
+      "name": "Moderate treatment adherence",
+      "agent_id": "patient",
+      "strategy": "adherence_moderate_r1",
+      "description": "Maintain moderate adherence with occasional missed doses.",
+      "effects": [
+        {"variable": "patient_adherence_rate", "operation": "add", "value": -0.05, "minimum": 0.10}
+      ],
+      "generated_events": [
+        {"event_type": "patient_r1_action", "description": "Patient maintains moderate adherence."}
+      ]
+    },
+    {
+      "id": "sustain_long_term_therapy",
+      "name": "Sustain long-term therapy",
+      "agent_id": "patient",
+      "strategy": "adherence_sustain_r2",
+      "description": "Commit to ongoing therapy refills and treatment continuation.",
+      "effects": [
+        {"variable": "patient_adherence_rate", "operation": "add", "value": 0.10, "maximum": 0.95}
+      ],
+      "generated_events": [
+        {"event_type": "patient_r2_action", "description": "Patient sustains long-term therapy."}
+      ]
+    },
+    {
+      "id": "partial_treatment_compliance",
+      "name": "Partial treatment compliance",
+      "agent_id": "patient",
+      "strategy": "adherence_partial_r2",
+      "description": "Treatment adherence drops due to cost or fatigue.",
+      "effects": [
+        {"variable": "patient_adherence_rate", "operation": "add", "value": -0.10, "minimum": 0.10}
+      ],
+      "generated_events": [
+        {"event_type": "patient_r2_action", "description": "Patient has partial treatment compliance."}
+      ]
+    }
+  ],
+  "trigger_definitions": [
+    {"id": "company-start-r1", "event_types": ["simulation_start"], "affected_agents": ["company"], "priority": 100},
+    {"id": "competitor-response-r1", "event_types": ["company_r1_action"], "affected_agents": ["competitor"], "priority": 90},
+    {"id": "payer-response-r1", "event_types": ["competitor_r1_action"], "affected_agents": ["payer"], "priority": 80},
+    {"id": "physician-response-r1", "event_types": ["payer_r1_action"], "affected_agents": ["physician"], "priority": 70},
+    {"id": "patient-response-r1", "event_types": ["physician_r1_action"], "affected_agents": ["patient"], "priority": 60},
+
+    {"id": "company-start-r2", "event_types": ["round_two_start"], "affected_agents": ["company"], "priority": 100},
+    {"id": "competitor-response-r2", "event_types": ["company_r2_action"], "affected_agents": ["competitor"], "priority": 90},
+    {"id": "payer-response-r2", "event_types": ["competitor_r2_action"], "affected_agents": ["payer"], "priority": 80},
+    {"id": "physician-response-r2", "event_types": ["payer_r2_action"], "affected_agents": ["physician"], "priority": 70},
+    {"id": "patient-response-r2", "event_types": ["physician_r2_action"], "affected_agents": ["patient"], "priority": 60}
+  ],
+  "transition_rules": [
+    {
+      "id": "derive-market-share",
+      "event_type": "action_transition,time_step",
+      "effects": [
+        {
+          "variable": "market_share",
+          "operation": "set",
+          "value": "round(min(0.85, max(0.01, payer_access * physician_prescribing_rate * patient_adherence_rate * min(1.5, competitor_price / max(drug_price, 1)) * min(1.5, company_promotion / max(competitor_promotion, 0.1)))), 4)"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "time_horizon": 1,
+    "initial_events": [
+      {"id": "start", "time": 0, "event_type": "simulation_start", "description": "Simulation begins.", "priority": 100}
+    ],
+    "scheduled_events": [
+      {"id": "round-2-trigger", "time": 1, "event_type": "round_two_start", "description": "Round 2 begins.", "priority": 100}
+    ],
+    "decision_policy": "llm"
+  },
+  "forecast_model_id": "launch_revenue",
+  "scenario_generation": {"policy": "limited", "max_scenarios": 1, "safety_limit": 1}
+}

@@ -1,0 +1,29 @@
+# Secrets — never commit provider credentials
+.env
+.env.*
+!.env.example
+!examples/*.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local scratch
+*.log
+tmp/

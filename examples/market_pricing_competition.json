@@ -1,0 +1,24 @@
+{
+  "metadata": {"id":"market-pricing-competition","name":"Market Pricing Competition","description":"Two sellers compete for a budget-limited customer","domain":"market_simulation"},
+  "initial_world_state": {"variables":{"seller_a_price":12,"seller_b_price":14,"customer_budget":15,"selected_seller":"none","sales":0}},
+  "agents": [
+    {"id":"seller_a","name":"Seller A","type":"seller","objective":"maximize sales while staying within customer budget","observable_state":"all","available_actions":["seller_a_discount","seller_a_maintain"],"decision_policy":{"default_actions":["seller_a_discount","seller_a_maintain"],"default_reason":"Both configured price strategies are plausible at market opening."}},
+    {"id":"seller_b","name":"Seller B","type":"seller","objective":"win the customer with a competitive price","observable_state":"all","available_actions":["seller_b_discount","seller_b_maintain"],"decision_policy":{"default_actions":["seller_b_discount","seller_b_maintain"],"default_reason":"Both configured price strategies are plausible at market opening."}},
+    {"id":"customer","name":"Customer","type":"customer","objective":"purchase the lowest-priced offer within budget","observable_state":["seller_a_price","seller_b_price","customer_budget"],"available_actions":["buy_seller_a","buy_seller_b"],"decision_policy":{"rules":[{"when":[{"variable":"seller_a_price","operator":"lt","value":{"variable":"seller_b_price"}},{"variable":"seller_a_price","operator":"lte","value":{"variable":"customer_budget"}}],"plausible_actions":["buy_seller_a"],"reason":"Seller A offers the lower price and is within budget."},{"when":[{"variable":"seller_b_price","operator":"lte","value":{"variable":"customer_budget"}}],"plausible_actions":["buy_seller_b"],"reason":"Seller B is within budget and Seller A is not cheaper."}],"default_actions":["buy_seller_a","buy_seller_b"],"default_reason":"Neither offer rule dominates; retain both valid choices."}}
+  ],
+  "action_definitions": [
+    {"id":"seller_a_discount","name":"Discount offer","agent_id":"seller_a","description":"Set a lower offer price","effects":[{"variable":"seller_a_price","operation":"set","value":10}],"generated_events":[{"event_type":"price_change","description":"Seller A updates its offer"}]},
+    {"id":"seller_a_maintain","name":"Maintain offer","agent_id":"seller_a","description":"Keep the current offer price","effects":[{"variable":"seller_a_price","operation":"set","value":12}],"generated_events":[{"event_type":"price_change","description":"Seller A confirms its offer"}]},
+    {"id":"seller_b_discount","name":"Discount offer","agent_id":"seller_b","description":"Set a lower offer price","effects":[{"variable":"seller_b_price","operation":"set","value":11}],"generated_events":[{"event_type":"price_change","description":"Seller B updates its offer"}]},
+    {"id":"seller_b_maintain","name":"Maintain offer","agent_id":"seller_b","description":"Keep the current offer price","effects":[{"variable":"seller_b_price","operation":"set","value":14}],"generated_events":[{"event_type":"price_change","description":"Seller B confirms its offer"}]},
+    {"id":"buy_seller_a","name":"Buy from Seller A","agent_id":"customer","description":"Select Seller A","effects":[{"variable":"selected_seller","operation":"set","value":"seller_a"},{"variable":"sales","operation":"add","value":1}]},
+    {"id":"buy_seller_b","name":"Buy from Seller B","agent_id":"customer","description":"Select Seller B","effects":[{"variable":"selected_seller","operation":"set","value":"seller_b"},{"variable":"sales","operation":"add","value":1}]}
+  ],
+  "trigger_definitions": [
+    {"id":"market-open","event_types":["market_open"],"affected_agents":["seller_a","seller_b"],"priority":100},
+    {"id":"customer-review","event_types":["price_change"],"affected_agents":["customer"],"priority":80}
+  ],
+  "settings":{"time_horizon":2,"step_duration":1,"step_unit":"round","initial_events":[{"id":"open","time":0,"event_type":"market_open","description":"Offers open for the customer"}]},
+  "forecast_model_id":"state_metrics",
+  "scenario_generation":{"policy":"diversity","max_scenarios":8,"diversity_by_agents":["seller_a","seller_b","customer"],"safety_limit":100}
+}

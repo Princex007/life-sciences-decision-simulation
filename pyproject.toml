@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lifescience-decision-engine"
+version = "0.1.0"
+description = "Deterministic scenario simulation for life-sciences decisions"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.7,<3", "fastapi>=0.110,<1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

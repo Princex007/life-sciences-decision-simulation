@@ -1,0 +1,116 @@
+{
+  "metadata": {
+    "id": "local-multi-agent-smoke",
+    "name": "Local LLM Multi-Agent Smoke Scenario",
+    "description": "Sequential company, competitor, and payer decisions through the existing engine.",
+    "domain": "life_sciences"
+  },
+  "initial_world_state": {
+    "time": 0,
+    "variables": {
+      "company_launch_status": "pre_launch",
+      "drug_price": 100,
+      "competitor_price": 95,
+      "competitor_promotion": 1.0,
+      "payer_access": 0.75
+    }
+  },
+  "agents": [
+    {
+      "id": "company",
+      "name": "Company",
+      "type": "company",
+      "objective": "Launch the product while choosing its configured price position.",
+      "observable_state": ["company_launch_status", "drug_price", "competitor_price"],
+      "available_actions": ["launch_at_list_price", "launch_at_discount_price"],
+      "decision_policy": {"type": "rule_based", "default_actions": ["launch_at_list_price", "launch_at_discount_price"]}
+    },
+    {
+      "id": "competitor",
+      "name": "Competitor",
+      "type": "competitor",
+      "objective": "Respond to the company's launch while protecting competitive position.",
+      "observable_state": ["company_launch_status", "drug_price", "competitor_price", "competitor_promotion"],
+      "available_actions": ["cut_competitor_price", "increase_competitor_promotion"],
+      "decision_policy": {"type": "rule_based", "default_actions": ["cut_competitor_price", "increase_competitor_promotion"]}
+    },
+    {
+      "id": "payer",
+      "name": "Payer",
+      "type": "payer",
+      "objective": "Set access after observing the launch and competitor response.",
+      "observable_state": ["company_launch_status", "drug_price", "competitor_price", "payer_access"],
+      "available_actions": ["restrict_access", "standard_access"],
+      "decision_policy": {"type": "rule_based", "default_actions": ["restrict_access", "standard_access"]}
+    }
+  ],
+  "action_definitions": [
+    {
+      "id": "launch_at_list_price",
+      "name": "Launch at list price",
+      "agent_id": "company",
+      "strategy": "list_price_launch",
+      "description": "Launch at the configured list price.",
+      "effects": [{"variable": "company_launch_status", "operation": "set", "value": "launched"}],
+      "generated_events": [{"event_type": "company_launch", "description": "Company launches at list price."}]
+    },
+    {
+      "id": "launch_at_discount_price",
+      "name": "Launch at discount price",
+      "agent_id": "company",
+      "strategy": "discount_price_launch",
+      "description": "Launch at a discounted price.",
+      "effects": [
+        {"variable": "drug_price", "operation": "set", "value": 80},
+        {"variable": "company_launch_status", "operation": "set", "value": "launched"}
+      ],
+      "generated_events": [{"event_type": "company_launch", "description": "Company launches at discounted price."}]
+    },
+    {
+      "id": "cut_competitor_price",
+      "name": "Cut competitor price",
+      "agent_id": "competitor",
+      "strategy": "price_response",
+      "description": "Reduce competitor price by 10%.",
+      "effects": [{"variable": "competitor_price", "operation": "multiply", "value": 0.9, "minimum": 50}],
+      "generated_events": [{"event_type": "competitor_response", "description": "Competitor cuts price after launch."}]
+    },
+    {
+      "id": "increase_competitor_promotion",
+      "name": "Increase competitor promotion",
+      "agent_id": "competitor",
+      "strategy": "promotion_response",
+      "description": "Increase competitor promotion by 20%.",
+      "effects": [{"variable": "competitor_promotion", "operation": "add", "value": 0.2}],
+      "generated_events": [{"event_type": "competitor_response", "description": "Competitor increases promotion after launch."}]
+    },
+    {
+      "id": "restrict_access",
+      "name": "Restrict access",
+      "agent_id": "payer",
+      "strategy": "restricted_access",
+      "description": "Set payer access to the configured restricted level.",
+      "effects": [{"variable": "payer_access", "operation": "set", "value": 0.55}]
+    },
+    {
+      "id": "standard_access",
+      "name": "Standard access",
+      "agent_id": "payer",
+      "strategy": "standard_access",
+      "description": "Set payer access to the configured standard level.",
+      "effects": [{"variable": "payer_access", "operation": "set", "value": 0.75}]
+    }
+  ],
+  "trigger_definitions": [
+    {"id": "company-start", "event_types": ["simulation_start"], "affected_agents": ["company"], "priority": 100},
+    {"id": "competitor-launch-response", "event_types": ["company_launch"], "affected_agents": ["competitor"], "priority": 90},
+    {"id": "payer-competitor-response", "event_types": ["competitor_response"], "affected_agents": ["payer"], "priority": 80}
+  ],
+  "settings": {
+    "time_horizon": 1,
+    "initial_events": [{"id": "start", "time": 0, "event_type": "simulation_start", "description": "Simulation begins.", "priority": 100}],
+    "scheduled_events": [],
+    "decision_policy": "llm"
+  },
+  "scenario_generation": {"policy": "limited", "max_scenarios": 1, "safety_limit": 1}
+}
