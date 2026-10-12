@@ -33,6 +33,7 @@ def _results_payload(simulation_id: str, definition: SimulationDefinition, resul
         "time_horizon": definition.settings.time_horizon,
         "step_unit": definition.settings.step_unit,
         "decision_policy": definition.settings.decision_policy,
+        "llm_usage": result.llm_usage,
         "key_drivers": sorted({item.driver_id for item in result.driver_impacts}),
         "assumption_labels": sorted({label for driver in definition.external_drivers
                                      for label in driver.assumption_labels()}),

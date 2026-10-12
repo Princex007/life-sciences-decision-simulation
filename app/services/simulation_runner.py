@@ -7,14 +7,16 @@ from app.forecasting.registry import ForecastRegistry
 from app.forecasting.state_metrics import StateMetricsForecast
 from app.simulation.engine import SimulationEngine
 from app.agents.base import RuleBasedDecisionPolicy
-from app.agents.llm import LLMClient, LLMDecisionPolicy
+from app.agents.llm import LLMCallBudget, LLMClient, LLMDecisionPolicy
 
 
-def create_decision_policy(mode: str, llm_client: LLMClient | None = None):
+def create_decision_policy(mode: str, llm_client: LLMClient | None = None,
+                           budget: LLMCallBudget | None = None):
     if mode == "rule_based":
         return RuleBasedDecisionPolicy()
     if mode == "llm":
-        return LLMDecisionPolicy(llm_client) if llm_client else LLMDecisionPolicy.from_environment()
+        return (LLMDecisionPolicy(llm_client, budget=budget) if llm_client
+                else LLMDecisionPolicy.from_environment(budget))
     raise ValueError(f"Unsupported decision policy '{mode}'.")
 
 
@@ -27,6 +29,9 @@ class SimulationRunnerService:
         registry.register("launch_revenue", LaunchForecast())
         registry.register("state_metrics", StateMetricsForecast())
         started = perf_counter()
-        policy = create_decision_policy(decision_policy or definition.settings.decision_policy, self.llm_client)
+        budget = LLMCallBudget(definition.settings.llm_max_calls,
+                               definition.settings.llm_max_total_tokens)
+        policy = create_decision_policy(decision_policy or definition.settings.decision_policy,
+                                        self.llm_client, budget)
         result = SimulationEngine(registry, decision_policy=policy).run(definition)
         return result, perf_counter() - started

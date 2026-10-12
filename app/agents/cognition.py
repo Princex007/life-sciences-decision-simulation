@@ -108,6 +108,12 @@ class DecisionAudit(BaseModel):
     validation_result: str = "pending"
     validation_errors: list[str] = Field(default_factory=list)
     selected_action: str | None = None
+    # Empty when the auditor did not state which mechanism produced the decision.
+    decision_source: str = ""
+    latency_ms: float | None = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    provider_attempts: int = 0
+    skip_reason: str = ""
 
 
 def build_decision_context(agent: AgentDefinition, state: AgentState,

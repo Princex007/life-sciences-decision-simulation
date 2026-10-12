@@ -4,6 +4,11 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.api.routes import router
+from app.config import load_project_env
+
+# Provider credentials live in a gitignored `.env`; values already exported in the
+# real environment win, and no value is ever logged.
+load_project_env()
 
 app = FastAPI(title="Life Sciences Decision Simulation Engine", version="0.1.0")
 app.include_router(router)

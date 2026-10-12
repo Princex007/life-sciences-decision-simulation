@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Callable, Protocol
 from urllib.error import HTTPError, URLError
@@ -12,8 +14,14 @@ from urllib.request import Request, urlopen
 from pydantic import BaseModel, Field
 
 from app.agents.cognition import DecisionAudit, DecisionContext, DecisionResponse
+from app.config import LLMConfigurationError, is_local_provider, resolve_llm_settings
+
+logger = logging.getLogger(__name__)
 
 PROMPT_CONTEXT_VERSION = "decision-context-v2"
+# Only transport-level failures are retried; a response rejected by validation is
+# never resubmitted, so an unusable model output cannot multiply into spend.
+RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 
 class DecisionPrompt(BaseModel):
@@ -27,6 +35,9 @@ class LLMCompletion(BaseModel):
     provider: str
     model: str
     model_version: str | None = None
+    latency_ms: float | None = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    attempts: int = 1
 
 
 class LLMClient(Protocol):
@@ -37,12 +48,68 @@ class LLMClient(Protocol):
                            prompt: DecisionPrompt) -> LLMCompletion: ...
 
 
-class LLMConfigurationError(ValueError):
-    """Required server-side LLM settings are absent or invalid."""
-
-
 class LLMClientError(RuntimeError):
     """A provider request could not be completed safely."""
+
+
+class LLMCallBudget:
+    """Per-run cap on provider calls and tokens, so one simulation cannot spend unboundedly.
+
+    A budget of `None` for a limit means that limit is not configured. Exhaustion is not
+    an error: the caller falls back to the configured deterministic policy and records why.
+    """
+
+    def __init__(self, max_calls: int | None = None, max_total_tokens: int | None = None):
+        if max_calls is not None and max_calls < 0:
+            raise ValueError("llm_max_calls cannot be negative.")
+        if max_total_tokens is not None and max_total_tokens < 0:
+            raise ValueError("llm_max_total_tokens cannot be negative.")
+        self.max_calls = max_calls
+        self.max_total_tokens = max_total_tokens
+        self.calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.skipped_calls = 0
+        self.latency_ms = 0.0
+        self.providers: set[str] = set()
+        self.models: set[str] = set()
+
+    @property
+    def exhausted_reason(self) -> str | None:
+        if self.max_calls is not None and self.calls >= self.max_calls:
+            return f"LLM call cap of {self.max_calls} reached."
+        if self.max_total_tokens is not None and self.total_tokens >= self.max_total_tokens:
+            return f"LLM token budget of {self.max_total_tokens} reached."
+        return None
+
+    def reserve(self) -> str | None:
+        """Return the exhaustion reason without consuming a call, or None if a call is allowed."""
+        return self.exhausted_reason
+
+    def record(self, completion: LLMCompletion) -> None:
+        self.calls += 1
+        self.providers.add(completion.provider)
+        self.models.add(completion.model)
+        if completion.latency_ms is not None:
+            self.latency_ms += completion.latency_ms
+        usage = completion.token_usage or {}
+        self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
+        self.completion_tokens += int(usage.get("completion_tokens") or 0)
+        self.total_tokens += int(usage.get("total_tokens")
+                                 or (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0))
+
+    def record_skip(self) -> None:
+        self.skipped_calls += 1
+
+    def summary(self) -> dict[str, object]:
+        """Secret-free run-level usage record for traces, logs, and the results API."""
+        return {"provider_calls": self.calls, "skipped_calls": self.skipped_calls,
+                "max_calls": self.max_calls, "max_total_tokens": self.max_total_tokens,
+                "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
+                "total_tokens": self.total_tokens, "total_latency_ms": round(self.latency_ms, 3),
+                "providers": sorted(self.providers), "models": sorted(self.models),
+                "exhausted_reason": self.exhausted_reason}
 
 
 class DecisionPromptBuilder:
@@ -170,8 +237,11 @@ Return only a JSON object matching the requested DecisionResponse schema; no mar
 class OpenAICompatibleLLMClient:
     """Server-side Chat Completions adapter for providers exposing the OpenAI-compatible API."""
     def __init__(self, api_key: str, base_url: str, model: str, timeout: float = 45,
-                 provider: str = "openai-compatible", temperature: float = 0):
-        if not api_key and not self._is_local_provider(provider):
+                 provider: str = "openai-compatible", temperature: float = 0,
+                 max_attempts: int = 2, max_output_tokens: int | None = None,
+                 referer: str | None = None, application: str | None = None,
+                 retry_backoff_seconds: float = 0.5):
+        if not api_key and not is_local_provider(provider):
             raise LLMConfigurationError("LLM_API_KEY is required for LLM decision mode.")
         if not base_url or not model:
             raise LLMConfigurationError("LLM_BASE_URL and LLM_MODEL must be configured for LLM mode.")
@@ -183,36 +253,54 @@ class OpenAICompatibleLLMClient:
         if not 0 <= temperature <= 2:
             raise LLMConfigurationError("LLM_TEMPERATURE must be between 0 and 2.")
         self.temperature = temperature
+        if not isinstance(max_attempts, int) or max_attempts < 1:
+            raise LLMConfigurationError("LLM_MAX_ATTEMPTS must be a whole number of at least 1.")
+        self.max_attempts = max_attempts
+        self.max_output_tokens = max_output_tokens
+        self.referer = referer
+        self.application = application
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     @classmethod
     def from_environment(cls) -> "OpenAICompatibleLLMClient":
-        key = os.getenv("LLM_API_KEY", "")
-        model = os.getenv("LLM_MODEL", "")
-        provider = os.getenv("LLM_PROVIDER", "openai-compatible")
-        if not key and not cls._is_local_provider(provider):
-            raise LLMConfigurationError("LLM mode requires the server-side LLM_API_KEY environment variable.")
-        if not model:
-            raise LLMConfigurationError("LLM mode requires the LLM_MODEL environment variable.")
+        settings = resolve_llm_settings()
+        output_cap = os.getenv("LLM_MAX_OUTPUT_TOKENS", "").strip()
         try:
-            timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
+            max_output = int(output_cap) if output_cap else None
         except ValueError as error:
-            raise LLMConfigurationError("LLM_TIMEOUT_SECONDS must be numeric.") from error
-        try:
-            temperature = float(os.getenv("LLM_TEMPERATURE", "0"))
-        except ValueError as error:
-            raise LLMConfigurationError("LLM_TEMPERATURE must be numeric.") from error
-        return cls(api_key=key,
-            base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
-            model=model, timeout=timeout,
-            provider=provider, temperature=temperature)
+            raise LLMConfigurationError("LLM_MAX_OUTPUT_TOKENS must be a whole number.") from error
+        return cls(api_key=settings.api_key, base_url=settings.base_url, model=settings.model,
+            timeout=settings.timeout_seconds, provider=settings.provider,
+            temperature=settings.temperature, max_attempts=settings.max_attempts,
+            max_output_tokens=max_output, referer=settings.referer, application=settings.application)
 
-    @staticmethod
-    def _is_local_provider(provider: str) -> bool:
-        return provider.strip().casefold() in {"local", "lm-studio", "lm_studio", "lmstudio"}
+    def describe(self) -> dict[str, object]:
+        """Secret-free description of this client, safe for logs and traces."""
+        return {"provider": self.provider, "model": self.model, "base_url": self.base_url,
+                "timeout_seconds": self.timeout, "temperature": self.temperature,
+                "max_attempts": self.max_attempts, "api_key_configured": bool(self._api_key)}
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        # OpenRouter attributes requests to an app; both are optional and non-secret.
+        if self.referer:
+            headers["HTTP-Referer"] = self.referer
+        if self.application:
+            headers["X-Title"] = self.application
+        return headers
+
+    def _wait_before_retry(self, attempt: int, reason: str) -> None:
+        delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
+        logger.warning("LLM provider attempt %d/%d failed (%s); retrying in %.2fs.",
+                       attempt, self.max_attempts, reason, delay)
+        if delay > 0:
+            time.sleep(delay)
 
     def generate_decision(self, context: DecisionContext,
                           prompt: DecisionPrompt) -> LLMCompletion:
-        local_provider = self._is_local_provider(self.provider)
+        local_provider = is_local_provider(self.provider)
         system_prompt = prompt.system
         if local_provider:
             system_prompt += "\n\nReturn ONLY one exact candidate action ID as plain text. No JSON or explanation."
@@ -221,21 +309,32 @@ class OpenAICompatibleLLMClient:
                          {"role": "user", "content": prompt.user}]}
         if local_provider:
             payload_data["max_tokens"] = 16
+        elif self.max_output_tokens:
+            payload_data["max_tokens"] = self.max_output_tokens
         if not local_provider:
             payload_data["response_format"] = {"type": "json_object"}
         payload = json.dumps(payload_data).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
         request = Request(self.base_url + "/chat/completions", data=payload, method="POST",
-            headers=headers)
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                envelope = json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
-            raise LLMClientError(f"LLM provider returned HTTP {error.code}.") from None
-        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
-            raise LLMClientError(f"LLM provider request failed: {type(error).__name__}.") from None
+            headers=self._headers())
+        started = time.perf_counter()
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                with urlopen(request, timeout=self.timeout) as response:
+                    envelope = json.loads(response.read().decode("utf-8"))
+                break
+            except HTTPError as error:
+                if error.code in RETRYABLE_STATUS_CODES and attempts < self.max_attempts:
+                    self._wait_before_retry(attempts, f"HTTP {error.code}")
+                    continue
+                raise LLMClientError(f"LLM provider returned HTTP {error.code}.") from None
+            except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
+                if attempts < self.max_attempts:
+                    self._wait_before_retry(attempts, type(error).__name__)
+                    continue
+                raise LLMClientError(f"LLM provider request failed: {type(error).__name__}.") from None
+        latency_ms = (time.perf_counter() - started) * 1000
         try:
             content = envelope["choices"][0]["message"]["content"]
             if not isinstance(content, str):
@@ -243,7 +342,20 @@ class OpenAICompatibleLLMClient:
         except (KeyError, IndexError, TypeError):
             raise LLMClientError("LLM provider returned an unsupported response envelope.") from None
         return LLMCompletion(content=content, provider=self.provider, model=self.model,
-                             model_version=envelope.get("model"))
+                             model_version=envelope.get("model"), latency_ms=round(latency_ms, 3),
+                             token_usage=_token_usage(envelope.get("usage")), attempts=attempts)
+
+
+def _token_usage(usage: object) -> dict[str, int]:
+    """Keep only the numeric token counters a provider returned; ignore everything else."""
+    if not isinstance(usage, dict):
+        return {}
+    kept = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            kept[key] = int(value)
+    return kept
 
 
 class MockLLMClient:
@@ -271,16 +383,27 @@ class MockLLMClient:
 
 class LLMDecisionPolicy:
     """Structured LLM-backed DecisionPolicy; only allowed action IDs can reach transitions."""
-    def __init__(self, client: LLMClient, prompt_builder: DecisionPromptBuilder | None = None):
+    def __init__(self, client: LLMClient, prompt_builder: DecisionPromptBuilder | None = None,
+                 budget: LLMCallBudget | None = None, fallback_policy=None):
         self.client = client
         self.prompt_builder = prompt_builder or DecisionPromptBuilder()
+        self.budget = budget if budget is not None else LLMCallBudget()
+        self.fallback_policy = fallback_policy
         self._last_completion: LLMCompletion | None = None
         self._last_raw_safe = ""
         self._last_context: DecisionContext | None = None
+        self._last_skip_reason = ""
+        # What the most recent decide() actually used. Defaults to "llm" so that an
+        # engine reading it before the first call still predicts a provider-backed
+        # decision; it becomes "existing_policy_fallback" whenever no call was made.
+        self.last_decision_source = "llm"
 
     @classmethod
-    def from_environment(cls) -> "LLMDecisionPolicy":
-        return cls(OpenAICompatibleLLMClient.from_environment())
+    def from_environment(cls, budget: LLMCallBudget | None = None) -> "LLMDecisionPolicy":
+        return cls(OpenAICompatibleLLMClient.from_environment(), budget=budget)
+
+    def usage_summary(self) -> dict[str, object]:
+        return self.budget.summary()
 
     def get_plausible_actions(self, context: DecisionContext):
         config = getattr(context, "policy_configuration", {}) or {}
@@ -299,18 +422,29 @@ class LLMDecisionPolicy:
         return context.available_actions
 
     def decide(self, context: DecisionContext, actions) -> DecisionResponse:
-        local_provider = OpenAICompatibleLLMClient._is_local_provider(
-            getattr(self.client, "provider", ""))
-        prompt = (self.prompt_builder.build_local_action_prompt(context, actions)
-                  if local_provider else self.prompt_builder.build(context))
         self._last_context = context.model_copy(deep=True)
         self._last_completion = None
+        self._last_raw_safe = ""
+        self._last_skip_reason = ""
+        blocked = self.budget.reserve()
+        if blocked:
+            self.budget.record_skip()
+            self._last_skip_reason = blocked
+            self.last_decision_source = "existing_policy_fallback"
+            logger.warning("LLM call skipped for agent %s: %s", context.agent_id, blocked)
+            return self._fallback_decision(context, actions, blocked)
+        local_provider = is_local_provider(getattr(self.client, "provider", ""))
+        prompt = (self.prompt_builder.build_local_action_prompt(context, actions)
+                  if local_provider else self.prompt_builder.build(context))
+        self.last_decision_source = "llm"
         try:
             completion = self.client.generate_decision(context.model_copy(deep=True), prompt)
             self._last_completion = completion
-            self._last_raw_safe = self._redact(completion.content)
+            self.budget.record(completion)
+            content = self._scrub(completion.content)
+            self._last_raw_safe = content[:12000]
             if local_provider:
-                action_id = completion.content.strip()
+                action_id = content.strip()
                 candidate_ids = {action.id if hasattr(action, "id") else str(action)
                                  for action in actions}
                 if action_id not in candidate_ids:
@@ -320,7 +454,7 @@ class LLMDecisionPolicy:
                 return DecisionResponse(primary_action=action_id,
                     rationale="Local model returned action-only.",
                     assumptions=["No model rationale was requested for local action-only selection."])
-            return DecisionResponse.model_validate_json(completion.content, strict=True)
+            return DecisionResponse.model_validate_json(content, strict=True)
         except Exception as error:
             if isinstance(error, LLMClientError):
                 message = str(error)
@@ -332,6 +466,18 @@ class LLMDecisionPolicy:
                 message = f"LLM decision failed safely ({type(error).__name__})."
             return DecisionResponse(primary_action="", rationale="LLM response rejected.",
                 validation_status="invalid", validation_errors=[message])
+
+    def _fallback_decision(self, context: DecisionContext, actions, reason: str) -> DecisionResponse:
+        """Answer from the configured deterministic policy without contacting a provider."""
+        policy = self.fallback_policy
+        if policy is None:
+            from app.agents.base import RuleBasedDecisionPolicy
+            policy = self.fallback_policy = RuleBasedDecisionPolicy()
+        response = policy.decide(context, actions)
+        return response.model_copy(update={"assumptions": [
+            *response.assumptions,
+            f"No provider call was made because {reason} "
+            "The configured rule-based policy chose this action instead; a model did not select it."]})
 
     def audit_for(self, context: DecisionContext, response: DecisionResponse,
                   validation_status: str = "pending", validation_errors: list[str] | None = None,
@@ -345,16 +491,26 @@ class LLMDecisionPolicy:
             trigger=context.trigger, input_context=context.model_copy(deep=True),
             raw_provider_response=self._last_raw_safe, parsed_response=response.model_copy(deep=True),
             validation_result=validation_status, validation_errors=list(validation_errors or []),
-            selected_action=selected_action)
+            selected_action=selected_action,
+            decision_source=self.last_decision_source,
+            latency_ms=completion.latency_ms if completion else None,
+            token_usage=dict(completion.token_usage) if completion else {},
+            provider_attempts=completion.attempts if completion else 0,
+            skip_reason=self._last_skip_reason)
 
-    def _redact(self, value: str) -> str:
+    def _scrub(self, value: str) -> str:
+        """Strip any credential a provider echoed back.
+
+        Applied before parsing, so a leaked key cannot reach the parsed decision, the
+        stored trace, or an API response — not just the raw-response field.
+        """
         configured_secret = getattr(self.client, "_api_key", None)
         if configured_secret:
             value = value.replace(configured_secret, "[REDACTED]")
         value = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+", r"\1[REDACTED]", value)
         value = re.sub(r"(?i)((?:api[_-]?key|authorization)\s*[:=]\s*)[^\s,\"}]+",
                        r"\1[REDACTED]", value)
-        return value[:12000]
+        return value
 
 
 class MockLLMDecisionPolicy(LLMDecisionPolicy):

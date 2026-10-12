@@ -109,3 +109,4 @@ td.why{max-width:330px;font-size:11.5px;color:#5b6f6a}
 .flow-terminal rect{fill:#d9f0e6;stroke:#0b7568;stroke-width:2.4}
 .flow-pruned rect{fill:#f3f4f3;stroke:#cfd6d3;stroke-dasharray:4 3}
 .flow-pruned .flow-line,.flow-pruned .flow-title,.flow-pruned .flow-kind{fill:#98a29e}
+.summary>.field-note,.summary>.assumption-note{flex-basis:100%;margin:0}

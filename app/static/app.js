@@ -9,6 +9,7 @@ let currentDefinition = null;
 function setStatus(text, bad=false){byId('status').textContent=text;byId('status').style.color=bad?'#a2352d':'#58706e';}
 function parseBox(id, fallback){try{return JSON.parse(byId(id).value||JSON.stringify(fallback));}catch(e){throw new Error(`${id}: ${e.message}`);}}
 function typedValue(value,type){if(type==='number')return Number(value);if(type==='boolean')return value==='true';if(type==='object'){try{return JSON.parse(value);}catch{return value;}}return value;}
+function optionalInt(id){const raw=byId(id).value.trim();if(raw==='')return null;const value=Number(raw);if(!Number.isInteger(value)||value<0)throw new Error(`${id}: enter a whole number of 0 or more, or leave it empty for no limit.`);return value;}
 function addVariableRow(name='',value='',meta={}){
   const tr=document.createElement('tr');tr._meta=meta||{};
   const types=['number','string','boolean','object'];let type=meta.type|| (typeof value==='number'?'number':typeof value==='boolean'?'boolean':typeof value==='object'?'object':'string');
@@ -72,6 +73,7 @@ function loadDefinition(d,isSaved=false){
   currentEvidence=JSON.parse(JSON.stringify(d.evidence||[]));
   currentId=d.metadata.id; saved=isSaved;byId('simId').value=d.metadata.id;byId('name').value=d.metadata.name;byId('description').value=d.metadata.description||'';
   byId('horizon').value=d.settings.time_horizon;byId('step').value=d.settings.step_duration;byId('stepUnit').value=d.settings.step_unit;byId('decisionPolicy').value=d.settings.decision_policy||'rule_based';
+  byId('llmMaxCalls').value=d.settings.llm_max_calls??'';byId('llmMaxTokens').value=d.settings.llm_max_total_tokens??'';
   byId('forecast').value=d.forecast_model_id||'state_metrics';byId('policy').value=d.scenario_generation.policy;
   byId('limit').value=d.scenario_generation.max_scenarios??9;byId('safety').value=d.scenario_generation.safety_limit??1000;
   byId('variables').replaceChildren();const vars=d.initial_world_state.variables||{};const metadata=d.world_variable_metadata||{};
@@ -101,7 +103,8 @@ function definitionFromForm(){
   base.agents=agents;base.action_definitions=parseBox('actions',[]);base.trigger_definitions=parseBox('triggers',[]);base.transition_rules=parseBox('transitions',[]);
   base.external_drivers=parseBox('drivers',[]);
   base.settings={...(base.settings||{}),time_horizon:Number(byId('horizon').value),step_duration:Number(byId('step').value),step_unit:byId('stepUnit').value,
-    initial_events:parseBox('initialEvents',[]),scheduled_events:parseBox('scheduledEvents',[]),decision_policy:byId('decisionPolicy').value};
+    initial_events:parseBox('initialEvents',[]),scheduled_events:parseBox('scheduledEvents',[]),decision_policy:byId('decisionPolicy').value,
+    llm_max_calls:optionalInt('llmMaxCalls'),llm_max_total_tokens:optionalInt('llmMaxTokens')};
   base.forecast_model_id=byId('forecast').value||null;
   const previousDiversity=base.scenario_generation?.diversity_by_agents||[];
   base.scenario_generation={...(base.scenario_generation||{}),policy:byId('policy').value,max_scenarios:Number(byId('limit').value),

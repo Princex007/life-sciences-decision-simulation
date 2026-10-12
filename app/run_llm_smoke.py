@@ -73,8 +73,8 @@ def _traced_service_policy_selection(client: TracingLocalClient):
     """Log the actual policy selected by SimulationRunnerService, then delegate unchanged."""
     original_factory = simulation_runner.create_decision_policy
 
-    def traced_factory(mode, llm_client=None):
-        policy = original_factory(mode, llm_client)
+    def traced_factory(mode, llm_client=None, budget=None):
+        policy = original_factory(mode, llm_client, budget)
         print(f"POLICY = LLM ({type(policy).__name__}, mode={mode!r})")
         if not isinstance(policy, LLMDecisionPolicy):
             raise RuntimeError("Smoke run did not select LLMDecisionPolicy.")

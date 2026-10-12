@@ -43,6 +43,11 @@ class SimulationSettings(BaseModel):
     scheduled_events: list[ScheduledEventDefinition] = Field(default_factory=list)
     transient_variables: list[str] = Field(default_factory=list)
     decision_policy: Literal["rule_based", "llm"] = "rule_based"
+    # Provider spend limits for one run. `None` means the limit is not configured.
+    # When a limit is reached the run continues on the configured rule-based policy
+    # and records that no provider call was made.
+    llm_max_calls: int | None = Field(default=None, ge=0)
+    llm_max_total_tokens: int | None = Field(default=None, ge=0)
 
 class ScenarioGenerationSettings(BaseModel):
     """Configurable scenario pruning strategy."""

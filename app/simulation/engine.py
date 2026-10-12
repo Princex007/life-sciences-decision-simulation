@@ -25,6 +25,20 @@ from app.evaluation.objective_scorer import ObjectiveScorer
 
 logger = logging.getLogger(__name__)
 
+def decision_source_for(policy) -> str:
+    """Name the mechanism that produced a decision, for the trace and the audit trail.
+
+    An LLM-backed policy hands the decision to its deterministic fallback once the
+    configured call budget is spent, so the policy type alone cannot answer this. A
+    policy that records what it actually used is authoritative; otherwise fall back to
+    the policy type.
+    """
+    recorded = getattr(policy, "last_decision_source", "")
+    if recorded:
+        return recorded
+    return ("llm" if any(cls.__name__ == "LLMDecisionPolicy" for cls in type(policy).__mro__)
+            else "existing_policy_fallback")
+
 class SimulationEngine:
     """Execute JSON-defined events, triggers, policies, and transition rules."""
     def __init__(self, forecast_registry: ForecastRegistry | None = None,
@@ -76,9 +90,13 @@ class SimulationEngine:
                 model = self.forecast_registry.get(forecast_id)
                 scenario.forecast = model.forecast(path.world, path.snapshots, scenario)
             scenarios.append(scenario)
-        return SimulationResult(simulation_id=definition.metadata.id, name=definition.metadata.name,
+        result = SimulationResult(simulation_id=definition.metadata.id, name=definition.metadata.name,
             root=root, scenarios=scenarios, pruning_records=generator.pruning_records,
             driver_impacts=driver_plan.impacts, driver_hypotheses=driver_plan.hypotheses)
+        usage_summary = getattr(policy, "usage_summary", None)
+        if callable(usage_summary):
+            result.llm_usage = usage_summary()
+        return result
 
     def _resolve(self, paths, events, time, definition, scheduler, generator, transition, policy, evidence_store):
         for path in paths:
@@ -150,9 +168,9 @@ class SimulationEngine:
                     context.action_previews = self._build_action_previews(
                         path.world, agent, proposed, definition, transition, time, forecast_model)
                     if objective is None:
-                        context.decision_source = ("llm" if any(cls.__name__ == "LLMDecisionPolicy"
-                            for cls in type(policy).__mro__) else "existing_policy_fallback")
+                        context.decision_source = decision_source_for(policy)
                         response = policy.decide(context, proposed)
+                        context.decision_source = decision_source_for(policy)
                     else:
                         scores = None
                         score_error = None
@@ -201,8 +219,7 @@ class SimulationEngine:
                                 context.decision_reason = (f"Top-score margin {margin:.6g} is within experimental tie tolerance "
                                                            f"{float(tolerance):.6g}; delegated to existing policy.")
                                 response = policy.decide(context, proposed)
-                                context.decision_source = ("llm" if any(cls.__name__ == "LLMDecisionPolicy"
-                                    for cls in type(policy).__mro__) else "existing_policy_fallback")
+                                context.decision_source = decision_source_for(policy)
                 else:
                     response = DecisionResponse(primary_action="",
                         rationale="No feasible configured actions remain.",

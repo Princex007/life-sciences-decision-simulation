@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from app.agents.cognition import ObservationModel, ObservedEvent, build_decision_context
 from app.agents.evidence_retrieval import RuleBasedEvidenceRetriever
 from app.agents.llm import DecisionPromptBuilder, LLMDecisionPolicy, OpenAICompatibleLLMClient
+from app.config import is_local_provider
 from app.domain.agent import AgentState
 from app.domain.definitions import SimulationDefinition
 from app.domain.event import SimulationEvent
@@ -106,7 +107,7 @@ def main() -> None:
     if client.timeout != 90:
         print("CONFIGURATION INVALID: this one-call run requires LLM_TIMEOUT_SECONDS=90; no LLM call made.")
         return
-    if not OpenAICompatibleLLMClient._is_local_provider(client.provider) or \
+    if not is_local_provider(client.provider) or \
             urlparse(client.base_url).hostname not in {"localhost", "127.0.0.1", "::1"}:
         print("CONFIGURATION INVALID: expected local LM Studio loopback endpoint; no LLM calls made.")
         return

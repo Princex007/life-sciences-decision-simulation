@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.agents.llm import LLMConfigurationError, OpenAICompatibleLLMClient
+from app.config import is_local_provider
 from app.domain.definitions import SimulationDefinition
 from app.services.simulation_runner import SimulationRunnerService
 from app.run_five_agent_simulation import TracingLocalClient
@@ -53,7 +54,7 @@ def get_client() -> TracingLocalClient:
         print(f"CONFIGURATION FAILURE = {error}")
         raise SystemExit(2)
 
-    if not OpenAICompatibleLLMClient._is_local_provider(configured.provider):
+    if not is_local_provider(configured.provider):
         print("CONFIGURATION FAILURE = LLM_PROVIDER must select local or lm-studio.")
         raise SystemExit(2)
     if urlparse(configured.base_url).hostname not in {"localhost", "127.0.0.1", "::1"}:

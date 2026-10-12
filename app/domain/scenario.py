@@ -88,6 +88,8 @@ class SimulationResult(BaseModel):
     pruning_records: list[PruningRecord] = Field(default_factory=list)
     driver_impacts: list[DriverImpactRecord] = Field(default_factory=list)
     driver_hypotheses: list[DriverHypothesisRecord] = Field(default_factory=list)
+    # Secret-free provider usage for the run; None when no LLM-backed policy was used.
+    llm_usage: dict[str, Any] | None = None
 
     def __iter__(self):
         """Allow legacy callers to iterate the terminal scenario paths."""

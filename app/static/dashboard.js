@@ -72,9 +72,20 @@ function drawSummary(summary){
     ['Forecast model',(summary.forecast_model||'none').replaceAll('_',' ')],['Scenario policy',summary.scenario_policy],
     ['Decision policy',(summary.decision_policy||'').replaceAll('_',' ')],
     ['Active drivers',(summary.key_drivers||[]).length?(summary.key_drivers||[]).join(', '):'none']];
+  const usage=summary.llm_usage;
+  if(usage){
+    cards.push(['Provider calls',usage.provider_calls],['Tokens reported',usage.total_tokens||0]);
+    if(usage.skipped_calls)cards.push(['Calls skipped by budget',usage.skipped_calls]);
+  }
   cards.forEach(([label,value])=>{const card=document.createElement('div');card.className='metric';
     const strong=document.createElement('b');strong.textContent=value;
     const small=document.createElement('span');small.textContent=label;card.append(strong,small);box.append(card);});
+  if(usage&&usage.exhausted_reason){
+    box.append(note(`${usage.exhausted_reason} ${usage.skipped_calls} decision(s) were made by the configured rule-based policy instead of a model. A model did not choose them.`,'assumption-note'));
+  }
+  if(usage&&usage.provider_calls&&!usage.skipped_calls){
+    box.append(note(`A provider selected ${usage.provider_calls} decision(s) using ${usage.models?.join(', ')||'an unreported model'}. Provider selection is not evidence that a decision is correct in the real world.`));
+  }
 }
 
 function drawAssumptions(summary,definition){
@@ -334,9 +345,19 @@ function drawDecisionAudit(scenarios){
     role.textContent=item.branch_role||'selected';roleCell.append(role);tr.append(roleCell);
     const whyCell=document.createElement('td');whyCell.className='why';
     whyCell.textContent=item.rationale||item.alternative_reason||'';
-    whyCell.title=[item.rationale,item.decision_context?.decision_reason,item.validity_reason].filter(Boolean).join('\n');
+    whyCell.title=decisionTooltip(item);
     tr.append(whyCell);body.append(tr);
   });
+}
+function decisionTooltip(item){
+  const audit=item.llm_audit||{};
+  const lines=[item.rationale,item.decision_context?.decision_reason,item.validity_reason];
+  if(audit.provider)lines.push(`provider: ${audit.provider} / ${audit.model||'unknown'}`);
+  if(audit.skip_reason)lines.push(`no provider call: ${audit.skip_reason}`);
+  else if(audit.latency_ms!=null)lines.push(`latency: ${Number(audit.latency_ms).toFixed(0)} ms over ${audit.provider_attempts||1} attempt(s)`);
+  const tokens=audit.token_usage||{};
+  if(tokens.total_tokens!=null)lines.push(`tokens: ${tokens.total_tokens} (prompt ${tokens.prompt_tokens??0} / completion ${tokens.completion_tokens??0})`);
+  return lines.filter(Boolean).join('\n');
 }
 function gradeBadgeSource(source){
   const span=document.createElement('span');span.className=`grade source-${source||'unspecified'}`;
