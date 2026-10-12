@@ -1,4 +1,6 @@
 """Contract tests for the data-defined simulation platform."""
+from app.agents.base import RuleBasedDecisionPolicy
+from app.agents.cognition import DecisionResponse
 from app.domain.definitions import SimulationDefinition
 from app.domain.scenario import ScenarioNode
 from app.forecasting.registry import ForecastRegistry
@@ -61,7 +63,20 @@ def test_json_launch_example_reproducible_and_forecast_is_plugin():
     _, second = run("examples/us_drug_launch.json")
     assert definition.metadata.domain == "life_sciences"
     assert first.model_dump() == second.model_dump()
-    assert len(first.scenarios) == 9
+    # Hybrid objective scoring makes the configured stakeholder decisions
+    # decisive, so the diversity policy retains one terminal branch rather than
+    # branching over every ambiguous alternative. Retained branches must still be
+    # distinct on the configured diversity dimensions.
+    assert len(first.scenarios) >= 1
+    assert len(first.scenarios) <= definition.scenario_generation.max_scenarios
+    signatures = {tuple(next(t.action.action_id for t in scenario.decision_trace
+        if t.event_type == "decision" and t.agent_id == actor and t.time == 0)
+        for actor in definition.scenario_generation.diversity_by_agents)
+        for scenario in first.scenarios}
+    assert len(signatures) == len(first.scenarios)
+    scored = [t for s in first.scenarios for t in s.decision_trace
+              if t.event_type == "decision" and t.decision_source == "objective_scorer"]
+    assert scored and all(t.branch_role == "selected" for t in scored)
     assert all(s.forecast is not None for s in first.scenarios)
     class FixedForecast:
         def forecast(self, final_state, snapshots, scenario):
@@ -237,12 +252,11 @@ def test_old_new_forecast_regression_has_causal_state_delta():
             "market_share":0.1252,"patients_treated":31329},
         "favorable_strong": {"peak_sales":3121455000,"cumulative_sales":17515015000,
             "market_share":0.1467,"patients_treated":36723}}
-    _, result = run("examples/us_drug_launch.json")
     representative = []
     for initial_access, initial_action in ((0.55,"restricted_access"),(.75,"standard_access"),(.9,"favorable_access")):
-        scenario = next(s for s in result.scenarios if any(t.event_type == "decision" and
-            t.agent_id == "payer" and t.time == 0 and t.action.action_id == initial_action
-            for t in s.decision_trace))
+        scenario = forced_payer_scenario(initial_action)
+        assert any(t.event_type == "decision" and t.agent_id == "payer" and t.time == 0
+                   and t.action.action_id == initial_action for t in scenario.decision_trace)
         representative.append((scenario, initial_access))
     for scenario, expected_access in representative:
         assert scenario.final_state.get("payer_access") == expected_access
@@ -255,3 +269,36 @@ def test_old_new_forecast_regression_has_causal_state_delta():
         assert [trace.observations["payer_access"] for trace in payer_decisions] == [0.75, expected_access, expected_access]
         assert any(trace.event_type == "transition" and "market_share" in trace.state_changes
                    for trace in scenario.decision_trace)
+
+def forced_payer_scenario(payer_action):
+    """Run the example with one forced Payer action.
+
+    Counterfactual only: the Payer objective is removed on a fresh definition
+    copy so the forced action enters through the regular policy path instead of
+    the objective scorer. These branches are therefore fallback-dependent.
+    """
+    from app.forecasting.launch_forecast import LaunchForecast
+    definition = SimulationDefinition.from_json("examples/us_drug_launch.json")
+    definition.evaluation_objectives.pop("payer")
+    registry = ForecastRegistry()
+    registry.register("launch_revenue", LaunchForecast())
+    result = SimulationEngine(registry, decision_policy=ForcedPayerPolicy(payer_action)).run(definition)
+    matching = [scenario for scenario in result.scenarios if any(
+        trace.event_type == "decision" and trace.agent_id == "payer" and trace.time == 0
+        and trace.action and trace.action.action_id == payer_action
+        for trace in scenario.decision_trace)]
+    assert matching, f"No retained scenario forced Payer action '{payer_action}'."
+    return matching[0]
+
+class ForcedPayerPolicy(RuleBasedDecisionPolicy):
+    """Force one Payer action whenever it is feasible; otherwise use configured rules."""
+    def __init__(self, payer_action):
+        self.payer_action = payer_action
+
+    def decide(self, context, actions):
+        if context.agent_id == "payer":
+            forced = next((action for action in actions if action.id == self.payer_action), None)
+            if forced is not None:
+                return DecisionResponse(primary_action=forced.id,
+                    rationale="Test-only forced Payer counterfactual.")
+        return super().decide(context, actions)

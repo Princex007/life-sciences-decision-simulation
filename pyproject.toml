@@ -11,3 +11,7 @@ dependencies = ["pydantic>=2.7,<3", "fastapi>=0.110,<1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# This machine's %TEMP%\pytest-of-DELL and the project's .pytest_cache have
+# deny ACLs, so tmp_path/caching fail during setup. Use project-local dirs.
+addopts = "--basetemp=.pytest_tmp"
+cache_dir = ".pytest_cache_local"

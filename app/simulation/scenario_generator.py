@@ -56,13 +56,17 @@ class ScenarioGenerator:
         outputs = []
         for definition in definitions:
             DecisionValidator().validate(agent, definition, path.world, trigger, time)
+            branch_role = "selected" if definition.id == response.primary_action else "counterfactual"
             child = path.clone()
             memory = child.agents[agent.id]
             before = child.world.model_copy(deep=True)
             previous_strategy = memory.current_strategy
             action = Action(action_id=definition.id, agent_id=definition.agent_id, name=definition.name,
                 category="decision", parameters=definition.parameters, description=definition.description)
-            rationale = f"Selected '{definition.name}' from the configured plausible set after trigger '{trigger.definition.id}'."
+            rationale = (f"Selected '{definition.name}' from the configured plausible set after trigger '{trigger.definition.id}'."
+                         if branch_role == "selected" else
+                         f"Counterfactual comparison branch: '{definition.name}' was feasible after trigger "
+                         f"'{trigger.definition.id}' but was not the decision layer's selection.")
             target_strategy = definition.strategy if definition.strategy is not None else definition.id
             already_applied = (memory.current_strategy == target_strategy and memory.previous_actions
                                and memory.previous_actions[-1] == definition.id)
@@ -83,7 +87,7 @@ class ScenarioGenerator:
             decision_node = ScenarioNode(node_id=self._new_node_id(), node_type="decision",
                 parent_node_id=child.cursor.node_id, time=time, world_state=before,
                 triggering_event=trigger.event, acting_agent=agent.id, plausible_actions=plausible,
-                selected_action=action, decision_rationale=rationale)
+                selected_action=action, decision_rationale=rationale, branch_role=branch_role)
             child.cursor.children.append(decision_node)
             child.cursor = decision_node
             child.trace.append(TraceEvent(time=time, agent_id=agent.id, event_type="decision",
@@ -100,6 +104,7 @@ class ScenarioGenerator:
                 decision_response=response,
                 decision_source=context.decision_source or "existing_policy_fallback",
                 objective_score_margin=context.objective_score_margin,
+                branch_role=branch_role,
                 validation_status=response.validation_status,
                 llm_audit=audit.model_copy(update={"selected_action": definition.id}, deep=True)
                     if audit is not None else None))

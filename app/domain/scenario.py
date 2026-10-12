@@ -38,6 +38,7 @@ class TraceEvent(BaseModel):
     validation_status: str = ""
     decision_source: str = ""
     objective_score_margin: float | None = None
+    branch_role: Literal["selected", "counterfactual"] = "selected"
 
 class ScenarioNode(BaseModel):
     """A node in the executable causal scenario tree."""
@@ -51,6 +52,7 @@ class ScenarioNode(BaseModel):
     plausible_actions: list[Action] = Field(default_factory=list)
     selected_action: Action | None = None
     decision_rationale: str = ""
+    branch_role: Literal["selected", "counterfactual"] = "selected"
     status: Literal["active", "pruned", "terminal"] = "active"
     pruning_policy: str | None = None
     pruning_reason: str | None = None
