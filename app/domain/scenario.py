@@ -4,6 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 from .action import Action
 from .agent import AgentState
+from .driver import DriverHypothesisRecord, DriverImpactRecord
 from .event import SimulationEvent
 from .outcome import Outcome
 from .world import WorldState
@@ -85,6 +86,8 @@ class SimulationResult(BaseModel):
     root: ScenarioNode
     scenarios: list[Scenario]
     pruning_records: list[PruningRecord] = Field(default_factory=list)
+    driver_impacts: list[DriverImpactRecord] = Field(default_factory=list)
+    driver_hypotheses: list[DriverHypothesisRecord] = Field(default_factory=list)
 
     def __iter__(self):
         """Allow legacy callers to iterate the terminal scenario paths."""

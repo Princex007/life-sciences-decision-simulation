@@ -1,0 +1,335 @@
+{
+  "metadata": {
+    "id": "ai-drug-discovery",
+    "name": "AI Impact on Drug Discovery",
+    "description": "Five-year template exploring how configured AI-adoption variants could change discovery cycle time, discovery cost, candidate throughput, competitor pipeline timing, and competitive intensity. Every driver pathway below is an explicitly configured illustrative assumption, not an empirical finding. No pathway is derived automatically from the driver's category or name.",
+    "domain": "life_sciences"
+  },
+  "initial_world_state": {
+    "variables": {
+      "rd_cycle_time_years": 5.0,
+      "rd_cost_index": 100.0,
+      "discovery_candidates": 20,
+      "competitor_pipeline_years": 4.5,
+      "competitive_intensity": 0.3,
+      "company_ai_allocation": 0.2
+    }
+  },
+  "world_variable_metadata": {
+    "rd_cycle_time_years": {
+      "units": "years",
+      "definition": "Configured discovery-to-preclinical cycle time.",
+      "evidence_grade": "synthetic_illustrative",
+      "assumption_labels": ["Illustrative baseline; not an empirical industry average."]
+    },
+    "rd_cost_index": {
+      "units": "index (100 = baseline)",
+      "definition": "Relative discovery R&D cost index.",
+      "evidence_grade": "synthetic_illustrative",
+      "assumption_labels": ["Illustrative index; not a currency amount and not calibrated."]
+    },
+    "discovery_candidates": {
+      "units": "count",
+      "definition": "Candidates entering the configured discovery stage per period.",
+      "evidence_grade": "synthetic_illustrative",
+      "assumption_labels": ["Illustrative throughput count."]
+    },
+    "competitor_pipeline_years": {
+      "units": "years",
+      "definition": "Time remaining in the competitor's configured lead programme.",
+      "evidence_grade": "synthetic_illustrative",
+      "assumption_labels": ["Illustrative competitor timing."]
+    },
+    "competitive_intensity": {
+      "units": "fraction (0 to 1)",
+      "definition": "Configured proxy for competitive pressure in the therapeutic area.",
+      "evidence_grade": "synthetic_illustrative",
+      "assumption_labels": ["Illustrative proxy; not a measured market concentration statistic."]
+    },
+    "company_ai_allocation": {
+      "units": "fraction (0 to 1)",
+      "definition": "Share of the company's discovery portfolio allocated to AI-enabled approaches.",
+      "evidence_grade": "user_assumption",
+      "assumption_labels": ["User-configurable portfolio allocation assumption."]
+    }
+  },
+  "evaluation_objectives": {
+    "company": {
+      "label": "Illustrative discovery-portfolio score balancing candidate throughput against configured discovery cost. Not calibrated evidence of value creation.",
+      "normalization_assumption": "discovery_candidates uses an illustrative 0 to 80 count range; rd_cost_index uses an illustrative 40 to 200 index range.",
+      "limitations": "Both components are synthetic illustrative proxies. The score expresses a configured preference, not an empirically validated objective.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "components": [
+        {"name": "candidate_throughput", "source": "projected_state", "metric": "discovery_candidates", "normalization": {"method": "min_max", "minimum": 0, "maximum": 80, "basis": "illustrative candidate-count ceiling"}, "preference": "maximize", "weight": 0.6},
+        {"name": "discovery_cost", "source": "projected_state", "metric": "rd_cost_index", "normalization": {"method": "min_max", "minimum": 40, "maximum": 200, "basis": "illustrative cost-index range"}, "preference": "minimize", "weight": 0.4}
+      ]
+    },
+    "competitor": {
+      "label": "Illustrative competitor score balancing programme speed against configured competitive position. Not calibrated evidence.",
+      "normalization_assumption": "competitor_pipeline_years uses an illustrative 1 to 6 year range; competitive_intensity uses its configured 0 to 1 bounds.",
+      "limitations": "Both components are synthetic illustrative proxies.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "components": [
+        {"name": "programme_speed", "source": "projected_state", "metric": "competitor_pipeline_years", "normalization": {"method": "min_max", "minimum": 1, "maximum": 6, "basis": "illustrative programme-length range"}, "preference": "minimize", "weight": 0.6},
+        {"name": "competitive_position", "source": "projected_state", "metric": "competitive_intensity", "normalization": {"method": "min_max", "minimum": 0, "maximum": 1, "basis": "configured competitive_intensity bounds"}, "preference": "maximize", "weight": 0.4}
+      ]
+    }
+  },
+  "agents": [
+    {
+      "id": "company",
+      "name": "Company",
+      "type": "pharma_company",
+      "objective": "Grow discovery throughput while containing configured discovery cost as AI adoption changes",
+      "initial_strategy": "maintain_portfolio",
+      "observable_state": [
+        "ai_discovery_adoption_index",
+        "rd_cycle_time_years",
+        "rd_cost_index",
+        "discovery_candidates",
+        "competitive_intensity",
+        "company_ai_allocation"
+      ],
+      "available_actions": ["expand_ai_discovery", "maintain_portfolio"],
+      "decision_policy": {
+        "default_actions": ["expand_ai_discovery", "maintain_portfolio"],
+        "default_reason": "Both portfolio postures are plausible at a scheduled review point."
+      }
+    },
+    {
+      "id": "competitor",
+      "name": "Competitor",
+      "type": "competitor",
+      "objective": "Shorten the lead programme and defend competitive position as AI adoption changes",
+      "initial_strategy": "maintain_pipeline",
+      "observable_state": [
+        "ai_discovery_adoption_index",
+        "competitor_pipeline_years",
+        "competitive_intensity"
+      ],
+      "available_actions": ["accelerate_pipeline", "maintain_pipeline"],
+      "decision_policy": {
+        "default_actions": ["accelerate_pipeline", "maintain_pipeline"],
+        "default_reason": "Both pipeline postures are plausible at a scheduled review point."
+      }
+    }
+  ],
+  "action_definitions": [
+    {
+      "id": "expand_ai_discovery",
+      "name": "Expand AI-enabled discovery",
+      "agent_id": "company",
+      "description": "Shift more of the discovery portfolio to AI-enabled approaches",
+      "strategy": "expand_ai_discovery",
+      "effects": [
+        {"variable": "company_ai_allocation", "operation": "add", "value": 0.15, "minimum": 0, "maximum": 1},
+        {"variable": "discovery_candidates", "operation": "add", "value": 6, "minimum": 0},
+        {"variable": "rd_cost_index", "operation": "add", "value": 4, "minimum": 40}
+      ],
+      "generated_events": [{"event_type": "company_portfolio_change", "description": "Company reallocates discovery portfolio"}]
+    },
+    {
+      "id": "maintain_portfolio",
+      "name": "Maintain portfolio",
+      "agent_id": "company",
+      "description": "Hold the current discovery allocation",
+      "strategy": "maintain_portfolio",
+      "effects": [
+        {"variable": "rd_cost_index", "operation": "subtract", "value": 1, "minimum": 40}
+      ],
+      "generated_events": [{"event_type": "company_portfolio_change", "description": "Company holds its discovery allocation"}]
+    },
+    {
+      "id": "accelerate_pipeline",
+      "name": "Accelerate lead programme",
+      "agent_id": "competitor",
+      "description": "Compress the competitor's lead programme timeline",
+      "strategy": "accelerate_pipeline",
+      "effects": [
+        {"variable": "competitor_pipeline_years", "operation": "subtract", "value": 0.4, "minimum": 1},
+        {"variable": "competitive_intensity", "operation": "add", "value": 0.03, "minimum": 0, "maximum": 1}
+      ],
+      "generated_events": [{"event_type": "competitor_pipeline_change", "description": "Competitor compresses its lead programme"}]
+    },
+    {
+      "id": "maintain_pipeline",
+      "name": "Maintain pipeline pace",
+      "agent_id": "competitor",
+      "description": "Hold the competitor's current programme pace",
+      "strategy": "maintain_pipeline",
+      "effects": [
+        {"variable": "competitive_intensity", "operation": "subtract", "value": 0.01, "minimum": 0, "maximum": 1}
+      ],
+      "generated_events": [{"event_type": "competitor_pipeline_change", "description": "Competitor holds its programme pace"}]
+    }
+  ],
+  "trigger_definitions": [
+    {"id": "opening-review-company", "event_types": ["simulation_start"], "affected_agents": ["company"], "priority": 70},
+    {"id": "opening-review-competitor", "event_types": ["simulation_start"], "affected_agents": ["competitor"], "priority": 65},
+    {"id": "ai-signal-company", "event_types": ["external_driver_ai_discovery"], "affected_agents": ["company"], "priority": 60, "cooldown": 1},
+    {"id": "ai-signal-competitor", "event_types": ["external_driver_ai_discovery"], "affected_agents": ["competitor"], "priority": 55, "cooldown": 1},
+    {"id": "annual-review-company", "event_types": ["time_step"], "affected_agents": ["company"], "priority": 20, "cooldown": 1},
+    {"id": "annual-review-competitor", "event_types": ["time_step"], "affected_agents": ["competitor"], "priority": 15, "cooldown": 1}
+  ],
+  "transition_rules": [
+    {
+      "id": "baseline-attrition",
+      "event_type": "time_step",
+      "effects": [
+        {"variable": "discovery_candidates", "operation": "subtract", "value": 1, "minimum": 0},
+        {"variable": "competitor_pipeline_years", "operation": "subtract", "value": 0.2, "minimum": 1}
+      ]
+    }
+  ],
+  "settings": {
+    "time_horizon": 5,
+    "step_duration": 1,
+    "step_unit": "year",
+    "decision_policy": "rule_based",
+    "initial_events": [
+      {"id": "start", "time": 0, "event_type": "simulation_start", "description": "Simulation begins", "priority": 100}
+    ],
+    "scheduled_events": []
+  },
+  "forecast_model_id": "state_metrics",
+  "scenario_generation": {
+    "policy": "diversity",
+    "max_scenarios": 6,
+    "diversity_by_agents": ["company", "competitor"],
+    "safety_limit": 24
+  },
+  "external_drivers": [
+    {
+      "driver_id": "ai_discovery",
+      "name": "AI advances in drug discovery",
+      "category": "technology",
+      "description": "Configured trajectory of AI adoption across target identification, molecular design, and preclinical prioritization. The three variants are alternative assumptions about the same driver, not probability-weighted forecasts.",
+      "enabled": true,
+      "active_variant": "accelerated",
+      "indicator_variable": "ai_discovery_adoption_index",
+      "initial_value": 0.1,
+      "observable_by": ["company", "competitor"],
+      "observable_from": 1,
+      "priority": 80,
+      "source": "",
+      "evidence_grade": "synthetic_illustrative",
+      "assumption_label": "Illustrative, uncalibrated AI-adoption trajectory. Not an empirical adoption measurement or a validated forecast.",
+      "variants": [
+        {
+          "variant_id": "conservative",
+          "label": "Conservative adoption",
+          "description": "Modest adoption; limited change in configured discovery productivity.",
+          "assumption_label": "Low-impact variant. Effect strengths are illustrative multipliers, not measured elasticities.",
+          "evidence_grade": "user_assumption",
+          "trajectory": [
+            {"time": 1, "level": 0.4, "indicator_value": 0.15, "description": "Early targeted pilots"},
+            {"time": 2, "level": 0.4, "indicator_value": 0.2},
+            {"time": 3, "level": 0.4, "indicator_value": 0.25},
+            {"time": 4, "level": 0.4, "indicator_value": 0.28},
+            {"time": 5, "level": 0.4, "indicator_value": 0.3}
+          ]
+        },
+        {
+          "variant_id": "accelerated",
+          "label": "Accelerated adoption",
+          "description": "Broader adoption across target identification, molecular design, and preclinical prioritization.",
+          "assumption_label": "Central illustrative variant. Effect strengths are configured assumptions.",
+          "evidence_grade": "user_assumption",
+          "trajectory": [
+            {"time": 1, "level": 1.0, "indicator_value": 0.25, "description": "Workflow-level adoption begins"},
+            {"time": 2, "level": 1.0, "indicator_value": 0.4},
+            {"time": 3, "level": 1.0, "indicator_value": 0.55},
+            {"time": 4, "level": 1.0, "indicator_value": 0.65},
+            {"time": 5, "level": 1.0, "indicator_value": 0.72}
+          ]
+        },
+        {
+          "variant_id": "disruptive",
+          "label": "Disruptive adoption",
+          "description": "Rapid capability gains, new entrants, and faster pipeline iteration, alongside validation, data, compute, and regulatory bottlenecks.",
+          "assumption_label": "High-impact variant. Effect strengths are illustrative multipliers, not measured elasticities.",
+          "evidence_grade": "user_assumption",
+          "trajectory": [
+            {"time": 1, "level": 1.8, "indicator_value": 0.35, "description": "Rapid capability gains"},
+            {"time": 2, "level": 1.8, "indicator_value": 0.6},
+            {"time": 3, "level": 1.8, "indicator_value": 0.8},
+            {"time": 4, "level": 1.8, "indicator_value": 0.92},
+            {"time": 5, "level": 1.8, "indicator_value": 0.98}
+          ]
+        }
+      ],
+      "trajectory": [
+        {"time": 1, "level": 1.0, "indicator_value": 0.25},
+        {"time": 2, "level": 1.0, "indicator_value": 0.4},
+        {"time": 3, "level": 1.0, "indicator_value": 0.55},
+        {"time": 4, "level": 1.0, "indicator_value": 0.65},
+        {"time": 5, "level": 1.0, "indicator_value": 0.72}
+      ],
+      "pathways": [
+        {
+          "target_variable": "discovery_candidates",
+          "operation": "add",
+          "value": 4,
+          "minimum": 0,
+          "lag": 0,
+          "basis": "Configured assumption: broader AI use in target identification and molecular design raises the number of candidates entering the discovery stage in the same period.",
+          "uncertainty": "Strength is an illustrative per-period count scaled by the variant level. Not an empirically estimated elasticity.",
+          "evidence_grade": "user_assumption"
+        },
+        {
+          "target_variable": "rd_cycle_time_years",
+          "operation": "subtract",
+          "value": 0.3,
+          "minimum": 1.0,
+          "lag": 1,
+          "basis": "Configured assumption: AI-assisted design and prioritization shortens the discovery-to-preclinical cycle after a one-year lag.",
+          "uncertainty": "Illustrative year reduction scaled by the variant level; no empirical cycle-time study backs this magnitude.",
+          "evidence_grade": "user_assumption"
+        },
+        {
+          "target_variable": "rd_cost_index",
+          "operation": "multiply",
+          "value": 0.97,
+          "minimum": 40,
+          "lag": 1,
+          "basis": "Configured assumption: automation of screening and design reduces the discovery cost index after a one-year lag.",
+          "uncertainty": "Illustrative proportional reduction interpolated toward identity by the variant level. Compute and data costs may offset it; that offset is not modeled.",
+          "evidence_grade": "user_assumption"
+        },
+        {
+          "target_variable": "competitor_pipeline_years",
+          "operation": "subtract",
+          "value": 0.25,
+          "minimum": 1.0,
+          "lag": 2,
+          "basis": "Configured assumption: competitors with access to the same tooling compress their lead programmes after a two-year lag.",
+          "uncertainty": "Illustrative year reduction. Assumes comparable tool access, which is not modeled per competitor.",
+          "evidence_grade": "user_assumption"
+        },
+        {
+          "target_variable": "competitive_intensity",
+          "operation": "add",
+          "value": 0.04,
+          "minimum": 0,
+          "maximum": 1,
+          "lag": 2,
+          "basis": "Configured assumption: lower entry barriers and faster iteration raise competitive pressure after a two-year lag.",
+          "uncertainty": "Illustrative proxy increment. competitive_intensity is not a measured concentration statistic.",
+          "evidence_grade": "user_assumption"
+        },
+        {
+          "target_variable": "probability_of_technical_success",
+          "operation": "add",
+          "value": 0,
+          "qualitative_only": true,
+          "basis": "Hypothesis only: AI could change the quality of selected candidates and therefore the probability of technical success.",
+          "uncertainty": "No defensible estimate is configured, so this pathway is deliberately NOT converted into a numeric state change. It is reported as a qualitative hypothesis. Historical success-rate data and expert review would be required before quantifying it.",
+          "evidence_grade": "model_hypothesis"
+        }
+      ],
+      "interacts_with": []
+    }
+  ]
+}

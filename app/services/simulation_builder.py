@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from app.domain.definitions import SimulationDefinition
+from app.simulation.external_drivers import validate_external_drivers
 
 class DefinitionValidationError(ValueError):
     def __init__(self, errors: list[str]):
@@ -112,6 +113,10 @@ class SimulationBuilderService:
         events.update(item.event_type for item in definition.settings.scheduled_events)
         events.update(event.get("event_type") for action in definition.action_definitions
                       for event in action.generated_events if event.get("event_type"))
+        # Drivers are compiled into scheduled events at run time; their stable
+        # signal type is what agent triggers subscribe to.
+        events.update(driver.base_event_type() for driver in definition.external_drivers)
+        errors.extend(validate_external_drivers(definition))
         for trigger in definition.trigger_definitions:
             if trigger.state_condition:
                 events.add(trigger.id)

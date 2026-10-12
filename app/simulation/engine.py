@@ -16,6 +16,7 @@ from app.forecasting.clinical_outcomes import expected_clinical_outcomes
 from app.forecasting.patient_affordability import estimate_patient_cost
 from app.forecasting.registry import ForecastRegistry
 from .scenario_generator import ScenarioGenerator, SimulationPath
+from .external_drivers import apply_external_drivers
 from .scenario_pruning import create_pruner
 from .scheduler import EventScheduler
 from .state_transition import StateTransitionSystem, evaluate_value
@@ -38,6 +39,7 @@ class SimulationEngine:
         self.evidence_retriever = evidence_retriever or RuleBasedEvidenceRetriever()
 
     def run(self, definition: SimulationDefinition) -> SimulationResult:
+        definition, driver_plan = apply_external_drivers(definition)
         settings = definition.settings
         if settings.time_horizon < 1:
             raise ValueError("time_horizon must be positive")
@@ -62,10 +64,12 @@ class SimulationEngine:
             events = scheduler.initial_events() if time == 0 else scheduler.scheduled_events(time)
             paths = self._resolve(paths, events, time, definition, scheduler, generator, transition, policy, evidence_store)
         scenarios = []
+        key_drivers = sorted(set(driver_plan.active_driver_ids))
         for index, path in enumerate(paths, 1):
             path.cursor.status = "terminal"
             scenario = Scenario(scenario_id=f"scenario-{index:03d}", name=self._name(path, definition),
-                actions=path.actions, final_state=path.world, key_drivers=[], decision_trace=path.trace,
+                actions=path.actions, final_state=path.world, key_drivers=list(key_drivers),
+                decision_trace=path.trace,
                 snapshots=path.snapshots, agent_states=list(path.agents.values()), terminal_node_id=path.cursor.node_id)
             forecast_id = definition.forecast_model_id
             if forecast_id:
@@ -73,7 +77,8 @@ class SimulationEngine:
                 scenario.forecast = model.forecast(path.world, path.snapshots, scenario)
             scenarios.append(scenario)
         return SimulationResult(simulation_id=definition.metadata.id, name=definition.metadata.name,
-            root=root, scenarios=scenarios, pruning_records=generator.pruning_records)
+            root=root, scenarios=scenarios, pruning_records=generator.pruning_records,
+            driver_impacts=driver_plan.impacts, driver_hypotheses=driver_plan.hypotheses)
 
     def _resolve(self, paths, events, time, definition, scheduler, generator, transition, policy, evidence_store):
         for path in paths:
@@ -89,6 +94,10 @@ class SimulationEngine:
                     if event.event_id not in recorded:
                         generator.append_event(path, event)
                         recorded.add(event.event_id)
+                        rule_result = transition.apply_event(path.world, event,
+                                                             definition.transition_rules)
+                        if rule_result.changes:
+                            generator.append_transition(path, event, rule_result)
                 matches = []
                 for agent in definition.agents:
                     if agent.id in path.decided_agents:

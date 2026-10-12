@@ -3,6 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 from .agent import AgentDefinition
 from .action import ActionDefinition, ActionEffect
+from .driver import ExternalDriver
 from .world import WorldState
 from .evidence import Evidence
 
@@ -73,6 +74,7 @@ class SimulationDefinition(BaseModel):
     settings: SimulationSettings = Field(default_factory=SimulationSettings)
     forecast_model_id: str | None = None
     scenario_generation: ScenarioGenerationSettings = Field(default_factory=ScenarioGenerationSettings)
+    external_drivers: list[ExternalDriver] = Field(default_factory=list)
 
     @classmethod
     def from_json(cls, path: str) -> "SimulationDefinition":
