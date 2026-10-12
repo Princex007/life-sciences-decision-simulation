@@ -108,7 +108,7 @@ class SimulationBuilderService:
                 policy_action_ids.update(rule.get("plausible_actions", []))
             for action_id in sorted(policy_action_ids - known_actions):
                 errors.append(f"Agent {agent.id} policy references unknown action {action_id}")
-        events = {"time_step"}
+        events = {"time_step", "action_transition"}
         events.update(item.event_type for item in definition.settings.initial_events)
         events.update(item.event_type for item in definition.settings.scheduled_events)
         events.update(event.get("event_type") for action in definition.action_definitions
@@ -127,8 +127,10 @@ class SimulationBuilderService:
                 if event_type not in events:
                     errors.append(f"Trigger {trigger.id} references unknown event {event_type}")
         for rule in definition.transition_rules:
-            if rule.event_type not in events:
-                errors.append(f"Transition rule {rule.id} references unknown event {rule.event_type}")
+            # StateTransitionSystem accepts a comma-separated list and "*" as a wildcard.
+            for event_type in (item.strip() for item in rule.event_type.split(",")):
+                if event_type and event_type != "*" and event_type not in events:
+                    errors.append(f"Transition rule {rule.id} references unknown event {event_type}")
         if definition.forecast_model_id and definition.forecast_model_id not in self.forecast_model_ids:
             errors.append(f"Forecast model {definition.forecast_model_id} is not registered")
         if definition.settings.time_horizon < 1:

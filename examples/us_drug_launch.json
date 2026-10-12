@@ -114,8 +114,8 @@
   "trigger_definitions": [
     {"id":"company-start","event_types":["simulation_start"],"affected_agents":["company"],"priority":100},
     {"id":"competitor-response","event_types":["company_launch","strategy_expired"],"affected_agents":["competitor"],"priority":90},
-    {"id":"payer-review","event_types":["company_launch","price_change","payer_review","evidence_update"],"affected_agents":["payer"],"priority":80},
-    {"id":"physician-response","event_types":["company_launch","price_change","competitor_positioning_change","evidence_update","access_change"],"affected_agents":["physician"],"priority":70},
+    {"id":"payer-review","event_types":["company_launch","price_change","payer_review"],"affected_agents":["payer"],"priority":80},
+    {"id":"physician-response","event_types":["company_launch","price_change","competitor_positioning_change"],"affected_agents":["physician"],"priority":70},
     {"id":"patient-launch-response","event_types":["company_launch"],"affected_agents":["patient"],"priority":60}
   ],
   "transition_rules": [

@@ -1,12 +1,16 @@
 const byId = id => document.getElementById(id);
-const agentBox = byId('agents'), actionBox = byId('actions'), triggerBox = byId('triggers');
-let currentId = null, saved = false, resultScenarios = [], nodeIndex = {}, currentEvidence = [], currentAgents = [];
+const agentBox = byId('agents'), actionBox = byId('actions'), triggerBox = byId('triggers'), driverBox = byId('drivers');
+let currentId = null, saved = false, resultScenarios = [], nodeIndex = {}, currentEvidence = [], currentAgents = [], currentDrivers = [];
+// Fields the guided forms do not edit (evaluation objectives, clinical and
+// affordability assumptions, domain, transient variables). Kept so that saving
+// from the UI never silently drops configuration it has no control for.
+let currentDefinition = null;
 
 function setStatus(text, bad=false){byId('status').textContent=text;byId('status').style.color=bad?'#a2352d':'#58706e';}
 function parseBox(id, fallback){try{return JSON.parse(byId(id).value||JSON.stringify(fallback));}catch(e){throw new Error(`${id}: ${e.message}`);}}
 function typedValue(value,type){if(type==='number')return Number(value);if(type==='boolean')return value==='true';if(type==='object'){try{return JSON.parse(value);}catch{return value;}}return value;}
 function addVariableRow(name='',value='',meta={}){
-  const tr=document.createElement('tr');
+  const tr=document.createElement('tr');tr._meta=meta||{};
   const types=['number','string','boolean','object'];let type=meta.type|| (typeof value==='number'?'number':typeof value==='boolean'?'boolean':typeof value==='object'?'object':'string');
   const cells=[document.createElement('td'),document.createElement('td'),document.createElement('td'),document.createElement('td'),document.createElement('td'),document.createElement('td'),document.createElement('td')];
   const nameInput=document.createElement('input');nameInput.value=name;nameInput.placeholder='variable_name';
@@ -16,7 +20,9 @@ function addVariableRow(name='',value='',meta={}){
   const maxInput=document.createElement('input');maxInput.value=meta.max??'';maxInput.placeholder='optional';
   const descInput=document.createElement('input');descInput.value=meta.description||'';descInput.placeholder='optional';
   const remove=document.createElement('button');remove.className='remove-row';remove.textContent='Remove';remove.onclick=()=>tr.remove();
-  [nameInput,typeSelect,valueInput,minInput,maxInput,descInput,remove].forEach((el,i)=>cells[i].append(el));cells.forEach(c=>tr.append(c));byId('variables').append(tr);
+  [nameInput,typeSelect,valueInput,minInput,maxInput,descInput,remove].forEach((el,i)=>cells[i].append(el));
+  if(meta.evidence_grade){const badge=document.createElement('span');badge.className=`grade grade-${meta.evidence_grade}`;badge.textContent=meta.evidence_grade.replaceAll('_',' ');badge.title=(meta.assumption_labels||[]).join(' ')||'Evidence grade recorded in the definition.';cells[5].append(badge);}
+  cells.forEach(c=>tr.append(c));byId('variables').append(tr);
 }
 function worldVariableNames(){return [...byId('variables').rows].map(row=>row.querySelector('input')?.value.trim()).filter(Boolean);}
 function availableActions(){try{return JSON.parse(actionBox.value||'[]');}catch{return [];}}
@@ -62,6 +68,7 @@ function loadTemplate(templateId){return request(`/simulations/templates/${encod
   setStatus('Example loaded. It is labeled hypothetical; assumptions are illustrative.');
 });}
 function loadDefinition(d,isSaved=false){
+  currentDefinition=JSON.parse(JSON.stringify(d||{}));
   currentEvidence=JSON.parse(JSON.stringify(d.evidence||[]));
   currentId=d.metadata.id; saved=isSaved;byId('simId').value=d.metadata.id;byId('name').value=d.metadata.name;byId('description').value=d.metadata.description||'';
   byId('horizon').value=d.settings.time_horizon;byId('step').value=d.settings.step_duration;byId('stepUnit').value=d.settings.step_unit;byId('decisionPolicy').value=d.settings.decision_policy||'rule_based';
@@ -70,26 +77,43 @@ function loadDefinition(d,isSaved=false){
   byId('variables').replaceChildren();const vars=d.initial_world_state.variables||{};const metadata=d.world_variable_metadata||{};
   Object.entries(vars).forEach(([k,v])=>addVariableRow(k,v,metadata[k]||{}));
   agentBox.value=JSON.stringify(d.agents||[],null,2);actionBox.value=JSON.stringify(d.action_definitions||[],null,2);renderAgents(d.agents||[]);
+  driverBox.value=JSON.stringify(d.external_drivers||[],null,2);renderDrivers(d.external_drivers||[]);
   triggerBox.value=JSON.stringify(d.trigger_definitions||[],null,2);byId('transitions').value=JSON.stringify(d.transition_rules||[],null,2);
   byId('initialEvents').value=JSON.stringify(d.settings.initial_events||[],null,2);byId('scheduledEvents').value=JSON.stringify(d.settings.scheduled_events||[],null,2);
-  byId('errors').textContent='';clearResults();setStatus(isSaved?'Loaded saved simulation':'Template loaded');
+  byId('errors').textContent='';clearResults();showWorkspace();setStatus(isSaved?'Loaded saved simulation':'Template loaded');
 }
-function blankDefinition(){return {metadata:{id:'new-simulation',name:'New Simulation',description:'',domain:'general'},initial_world_state:{variables:{}},world_variable_metadata:{},evidence:[],agents:[],action_definitions:[],trigger_definitions:[],transition_rules:[],settings:{time_horizon:4,step_duration:1,step_unit:'round',decision_policy:'rule_based',initial_events:[{id:'start',time:0,event_type:'simulation_start',description:'Simulation begins'}],scheduled_events:[]},forecast_model_id:'state_metrics',scenario_generation:{policy:'diversity',max_scenarios:9,diversity_by_agents:[],safety_limit:1000}};}
+function blankDefinition(){return {metadata:{id:'new-simulation',name:'New Simulation',description:'',domain:'general'},initial_world_state:{variables:{}},world_variable_metadata:{},evidence:[],agents:[],action_definitions:[],trigger_definitions:[],transition_rules:[],external_drivers:[],settings:{time_horizon:4,step_duration:1,step_unit:'round',decision_policy:'rule_based',initial_events:[{id:'start',time:0,event_type:'simulation_start',description:'Simulation begins'}],scheduled_events:[]},forecast_model_id:'state_metrics',scenario_generation:{policy:'diversity',max_scenarios:9,diversity_by_agents:[],safety_limit:1000}};}
 function definitionFromForm(){
   const variables={}, variableMetadata={};
-  [...byId('variables').rows].forEach(row=>{const [name,type,value,min,max,description]=[...row.querySelectorAll('input,select')];if(!name.value.trim())return;variables[name.value.trim()]=typedValue(value.value,type.value);const m={type:type.value};if(min.value!=='')m.min=Number(min.value);if(max.value!=='')m.max=Number(max.value);if(description.value)m.description=description.value;variableMetadata[name.value.trim()]=m;});
+  [...byId('variables').rows].forEach(row=>{const [name,type,value,min,max,description]=[...row.querySelectorAll('input,select')];if(!name.value.trim())return;const key=name.value.trim();variables[key]=typedValue(value.value,type.value);
+    const m={...(row._meta||{}),type:type.value};
+    if(min.value!=='')m.min=Number(min.value);else delete m.min;
+    if(max.value!=='')m.max=Number(max.value);else delete m.max;
+    if(description.value)m.description=description.value;else delete m.description;
+    variableMetadata[key]=m;});
   const id=byId('simId').value.trim();if(!id)throw new Error('Definition ID is required.');
-  return {metadata:{id,name:byId('name').value.trim(),description:byId('description').value,domain:'general'},initial_world_state:{time:0,variables},world_variable_metadata:variableMetadata,evidence:currentEvidence,
-    agents:parseBox('agents',[]),action_definitions:parseBox('actions',[]),trigger_definitions:parseBox('triggers',[]),transition_rules:parseBox('transitions',[]),
-    settings:{time_horizon:Number(byId('horizon').value),step_duration:Number(byId('step').value),step_unit:byId('stepUnit').value,
-      initial_events:parseBox('initialEvents',[]),scheduled_events:parseBox('scheduledEvents',[]),decision_policy:byId('decisionPolicy').value},forecast_model_id:byId('forecast').value||null,
-    scenario_generation:{policy:byId('policy').value,max_scenarios:Number(byId('limit').value),diversity_by_agents:parseBox('agents',[]).map(agent=>agent.id),safety_limit:Number(byId('safety').value)}};
+  const base=JSON.parse(JSON.stringify(currentDefinition||blankDefinition()));
+  const agents=parseBox('agents',[]);
+  base.metadata={...(base.metadata||{}),id,name:byId('name').value.trim(),description:byId('description').value,domain:base.metadata?.domain||'general'};
+  base.initial_world_state={...(base.initial_world_state||{}),time:base.initial_world_state?.time??0,variables};
+  base.world_variable_metadata=variableMetadata;
+  base.evidence=currentEvidence;
+  base.agents=agents;base.action_definitions=parseBox('actions',[]);base.trigger_definitions=parseBox('triggers',[]);base.transition_rules=parseBox('transitions',[]);
+  base.external_drivers=parseBox('drivers',[]);
+  base.settings={...(base.settings||{}),time_horizon:Number(byId('horizon').value),step_duration:Number(byId('step').value),step_unit:byId('stepUnit').value,
+    initial_events:parseBox('initialEvents',[]),scheduled_events:parseBox('scheduledEvents',[]),decision_policy:byId('decisionPolicy').value};
+  base.forecast_model_id=byId('forecast').value||null;
+  const previousDiversity=base.scenario_generation?.diversity_by_agents||[];
+  base.scenario_generation={...(base.scenario_generation||{}),policy:byId('policy').value,max_scenarios:Number(byId('limit').value),
+    diversity_by_agents:Array.isArray(previousDiversity)&&previousDiversity.length?previousDiversity:agents.map(agent=>agent.id),
+    safety_limit:Number(byId('safety').value)};
+  return base;
 }
 async function request(url,options={}){const response=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});let data;try{data=await response.json();}catch{data={};}if(!response.ok){const detail=data.detail;throw new Error(typeof detail==='string'?detail:detail?.errors?.join('\n')||JSON.stringify(detail)||response.statusText);}return data;}
 async function save(){const definition=definitionFromForm();if(saved&&currentId===definition.metadata.id){await request(`/simulations/${encodeURIComponent(currentId)}`,{method:'PUT',body:JSON.stringify(definition)});}else{await request('/simulations',{method:'POST',body:JSON.stringify(definition)});saved=true;currentId=definition.metadata.id;}loadDefinition(definition,true);await refreshSaved();setStatus('Saved to local JSON');return definition;}
-async function refreshSaved(){const items=await request('/simulations');const select=byId('savedSelect');const keep=select.value;select.replaceChildren(new Option('Choose saved simulation…',''));items.forEach(item=>select.add(new Option(item.name,item.simulation_id)));if(items.some(item=>item.simulation_id===keep))select.value=keep;}
-async function refreshTemplates(){const items=await request('/simulations/templates');const select=byId('templateSelect');items.forEach(item=>{const option=new Option(item.name,item.id);option.title=item.description||'';select.add(option);});}
-function clearResults(){byId('summary').textContent='Run a simulation to view results.';byId('tree').textContent='The tree will appear here after a run.';byId('comparison').querySelector('thead').replaceChildren();byId('comparison').querySelector('tbody').replaceChildren();byId('scenarioDetail').textContent='Select a terminal scenario in the tree or comparison table.';byId('charts').textContent='Run a simulation to compare outcomes visually.';resultScenarios=[];nodeIndex={};}
+async function refreshSaved(){const items=await request('/simulations');const select=byId('savedSelect');const keep=select.value;select.replaceChildren(new Option('Choose saved simulation…',''));items.forEach(item=>select.add(new Option(item.name,item.simulation_id)));if(items.some(item=>item.simulation_id===keep))select.value=keep;return items;}
+async function refreshTemplates(){const items=await request('/simulations/templates');const select=byId('templateSelect');select.replaceChildren(new Option('Choose an example…',''));items.forEach(item=>{const option=new Option(item.name,item.id);option.title=item.description||'';select.add(option);});return items;}
+function clearResults(){byId('summary').textContent='Run a simulation to view results.';byId('tree').textContent='The tree will appear here after a run.';byId('comparison').querySelector('thead').replaceChildren();byId('comparison').querySelector('tbody').replaceChildren();byId('scenarioDetail').textContent='Select a terminal scenario in the flowchart, tree, or comparison table.';byId('charts').textContent='Run a simulation to compare outcomes visually.';clearDashboard();resultScenarios=[];nodeIndex={};}
 function safePre(title,value){const section=document.createElement('div');section.className='detail-block';const heading=document.createElement('b');heading.textContent=title;const pre=document.createElement('pre');pre.textContent=JSON.stringify(value,null,2);section.append(heading,pre);return section;}
 function selectScenario(scenario){
   const target=byId('scenarioDetail');target.replaceChildren();const heading=document.createElement('h3');heading.textContent=scenario.name;target.append(heading);
@@ -116,7 +140,10 @@ function drawTree(root,scenarios){
 function drawComparison(scenarios){
   const table=byId('comparison'),head=table.querySelector('thead'),body=table.querySelector('tbody');head.replaceChildren();body.replaceChildren();
   const keys=[...new Set(scenarios.flatMap(s=>Object.keys(s.forecast?.metrics||{})))];const tr=document.createElement('tr');['Scenario',...keys].forEach(key=>{const th=document.createElement('th');th.textContent=key;tr.append(th)});head.append(tr);
-  scenarios.forEach(s=>{const row=document.createElement('tr');const first=document.createElement('td');const btn=document.createElement('button');btn.className='subtle';btn.textContent=s.name;btn.onclick=()=>selectScenario(s);first.append(btn);row.append(first);keys.forEach(k=>{const td=document.createElement('td');td.textContent=s.forecast?.metrics?.[k]??'—';row.append(td)});body.append(row);});
+  scenarios.forEach(s=>{const row=document.createElement('tr');const first=document.createElement('td');const btn=document.createElement('button');btn.className='subtle scenario-name';btn.textContent=s.name;btn.title=s.name;btn.onclick=()=>selectScenario(s);first.append(btn);
+    const counterfactual=(s.decision_trace||[]).filter(t=>t.event_type==='decision'&&t.branch_role==='counterfactual').length;
+    const role=document.createElement('span');role.className=counterfactual?'grade grade-counterfactual':'grade grade-selected';role.textContent=counterfactual?`${counterfactual} counterfactual choice${counterfactual===1?'':'s'}`:'model-selected path';first.append(role);
+    row.append(first);keys.forEach(k=>{const td=document.createElement('td');td.textContent=s.forecast?.metrics?.[k]??'—';row.append(td)});body.append(row);});
 }
 function formatChartValue(metric,value){if(metric==='market_share')return `${(value*100).toFixed(2)}%`;if(metric==='patients_treated')return Math.round(value).toLocaleString();return Number(value).toLocaleString(undefined,{maximumFractionDigits:0})+' scenario currency';}
 function drawCharts(scenarios){
@@ -133,23 +160,38 @@ function drawCharts(scenarios){
   });
   const note=document.createElement('p');note.className='assumption-note';note.textContent='Charts visualize the configured model only. Example values are synthetic and uncalibrated.';root.append(note);
 }
-async function runSimulation(){await save();await request(`/simulations/${encodeURIComponent(currentId)}/validate`,{method:'POST'});const runInfo=await request(`/simulations/${encodeURIComponent(currentId)}/run`,{method:'POST'});const results=await request(`/simulations/${encodeURIComponent(currentId)}/results`);const tree=await request(`/simulations/${encodeURIComponent(currentId)}/tree`);resultScenarios=results.scenarios;
-  const summary=results.summary;byId('summary').innerHTML='';[['Terminal scenarios',summary.terminal_scenarios],['Pruned nodes',summary.pruned_nodes],['Duration (s)',summary.duration_seconds.toFixed(4)],['Forecast model',summary.forecast_model||'none'],['Scenario policy',summary.scenario_policy]].forEach(([k,v])=>{const d=document.createElement('div');d.className='metric';const b=document.createElement('b');b.textContent=v;const small=document.createElement('span');small.textContent=k;d.append(b,small);byId('summary').append(d)});
-  drawTree(tree.root,resultScenarios);drawComparison(resultScenarios);drawCharts(resultScenarios);setStatus(`Run complete: ${runInfo.scenario_count} scenarios`);
+async function runSimulation(){
+  setProgress('Saving definition…',10);
+  const definition=await save();
+  const path=`/simulations/${encodeURIComponent(currentId)}`;
+  setProgress('Validating definition…',25);
+  await request(`${path}/validate`,{method:'POST'});
+  setProgress('Running scenario tree…',55);
+  const runInfo=await request(`${path}/run`,{method:'POST'});
+  setProgress('Collecting traces and driver effects…',80);
+  const results=await request(`${path}/results`);
+  setProgress('Rendering charts, flowchart, and audit tables…',92);
+  resultScenarios=results.scenarios;
+  renderDashboard(results,definition);
+  setProgress(`Run complete: ${runInfo.scenario_count} scenario${runInfo.scenario_count===1?'':'s'} in ${runInfo.duration_seconds.toFixed(3)}s`,100);
+  setStatus(`Run complete: ${runInfo.scenario_count} scenarios`);
+  setTimeout(hideProgress,2200);
 }
 
 byId('addVariable').onclick=()=>addVariableRow();
 byId('addAgent').onclick=()=>{const number=currentAgents.length+1;let id=`new-agent-${number}`;while(currentAgents.some(agent=>agent.id===id))id=`new-agent-${Math.floor(Math.random()*100000)}`;currentAgents.push({id,name:`New agent ${number}`,type:'generic',objective:'Describe this stakeholder’s goal.',observable_state:[],available_actions:[],decision_policy:{type:'rule_based',default_actions:[]}});renderAgents(currentAgents);syncAgentsFromForm();};
-byId('quickstartBtn').onclick=()=>loadTemplate('us_drug_launch').catch(error=>{byId('errors').textContent=error.message;setStatus('Example could not be loaded',true);});
 actionBox.addEventListener('change',()=>renderAgents(currentAgents));
 byId('variables').addEventListener('change',()=>renderAgents(currentAgents));
 agentBox.addEventListener('change',()=>{try{renderAgents(JSON.parse(agentBox.value||'[]'));}catch(error){byId('errors').textContent=`Agent settings JSON: ${error.message}`;}});
-byId('newBtn').onclick=()=>{loadDefinition(blankDefinition(),false);saved=false;currentId=null;};
+driverBox.addEventListener('change',()=>{try{renderDrivers(JSON.parse(driverBox.value||'[]'));}catch(error){byId('errors').textContent=`Driver settings JSON: ${error.message}`;}});
+byId('newBtn').onclick=()=>startBlank();
 byId('saveBtn').onclick=async()=>{try{await save();byId('errors').textContent='';}catch(e){byId('errors').textContent=e.message;setStatus('Save failed',true);}};
 byId('loadBtn').onclick=async()=>{try{const id=byId('savedSelect').value;if(!id)throw new Error('Choose a saved simulation first.');const data=await request(`/simulations/${encodeURIComponent(id)}`);loadDefinition(data.definition,true);}catch(e){byId('errors').textContent=e.message;setStatus('Load failed',true);}};
 byId('templateLoadBtn').onclick=async()=>{try{const id=byId('templateSelect').value;if(!id)throw new Error('Choose an example first.');await loadTemplate(id);}catch(e){byId('errors').textContent=e.message;setStatus('Example load failed',true);}};
-byId('validateBtn').onclick=async()=>{try{const d=definitionFromForm();const result=await request('/simulations/validate',{method:'POST',body:JSON.stringify(d)});byId('errors').textContent='';setStatus(result.valid?'Definition is valid':'Validation failed');}catch(e){byId('errors').textContent=e.message;setStatus('Validation failed',true);}};
-byId('runBtn').onclick=async()=>{try{byId('errors').textContent='';await runSimulation();}catch(e){byId('errors').textContent=e.message;setStatus('Run failed',true);}};
+byId('validateBtn').onclick=async()=>{try{const d=definitionFromForm();const result=await request('/simulations/validate',{method:'POST',body:JSON.stringify(d)});byId('errors').textContent='';
+  const gaps=[];if(!(d.agents||[]).length)gaps.push('no agents');if(!Object.keys(d.initial_world_state?.variables||{}).length)gaps.push('no world variables');if(!(d.action_definitions||[]).length)gaps.push('no actions');
+  setStatus(!result.valid?'Validation failed':gaps.length?`Definition is valid, but it has ${gaps.join(', ')} — a run will only produce a baseline path.`:'Definition is valid — ready to run');
+  }catch(e){byId('errors').textContent=e.message;setStatus('Validation failed',true);}};
+byId('runBtn').onclick=async()=>{const button=byId('runBtn');button.disabled=true;try{byId('errors').textContent='';await runSimulation();}catch(e){byId('errors').textContent=e.message;hideProgress();setStatus('Run failed',true);}finally{button.disabled=false;}};
 byId('duplicateBtn').onclick=async()=>{try{if(!saved)await save();const d=await request(`/simulations/${encodeURIComponent(currentId)}/duplicate`,{method:'POST'});await refreshSaved();const loaded=await request(`/simulations/${encodeURIComponent(d.simulation_id)}`);loadDefinition(loaded.definition,true);}catch(e){byId('errors').textContent=e.message;setStatus('Duplicate failed',true);}};
 byId('savedSelect').onchange=async()=>{const id=byId('savedSelect').value;if(!id)return;try{const d=await request(`/simulations/${encodeURIComponent(id)}`);loadDefinition(d.definition,true);}catch(e){setStatus(e.message,true);}};
-Promise.all([refreshSaved(),refreshTemplates()]).then(()=>loadDefinition(blankDefinition(),false)).catch(e=>setStatus(e.message,true));

@@ -5,28 +5,72 @@
   <title>Simulation Builder</title><link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header><div><strong>Life Sciences Decision Simulation &amp; Forecasting</strong><span>Local Simulation Builder</span></div><div class="header-actions"><button id="newBtn" class="subtle">New</button><button id="duplicateBtn" class="subtle">Duplicate</button><button id="saveBtn">Save Simulation</button><button id="loadBtn" class="subtle">Load Simulation</button></div></header>
+<header><div><strong>Life Sciences Decision Simulation &amp; Forecasting</strong><span>Local Simulation Builder</span></div><div class="header-actions"><button id="homeBtn" class="subtle">Home</button><button id="newBtn" class="subtle">New</button><button id="duplicateBtn" class="subtle">Duplicate</button><button id="saveBtn">Save Simulation</button><button id="loadBtn" class="subtle">Load Simulation</button></div></header>
+
 <main>
+<!-- ============ LANDING VIEW ============ -->
+<div id="viewHome" class="view">
+  <section class="hero card">
+    <span class="eyebrow">DECISION SIMULATION WORKBENCH</span>
+    <h1>Model stakeholder decisions, then compare what changes</h1>
+    <p>Build a scenario, run it deterministically, and inspect every recorded decision, driver effect, and pruned branch. Nothing here is a market forecast or clinical evidence.</p>
+    <p class="assumption-note">All bundled examples use synthetic, uncalibrated values. Every assumption is labeled in the builder and in the results.</p>
+    <div class="hero-actions">
+      <button id="startScratchBtn" class="primary">Start from scratch</button>
+      <a class="hero-link" href="#examples">Browse examples</a>
+      <a class="hero-link" href="#recent">Continue a saved simulation</a>
+    </div>
+  </section>
+
+  <section class="card" id="examples">
+    <h2>One-click examples</h2>
+    <p>Loading an example creates an editable copy. It never overwrites the bundled file.</p>
+    <div id="exampleCards" class="example-grid"><p class="muted">Loading examples…</p></div>
+  </section>
+
+  <section class="card" id="recent">
+    <h2>Saved simulations</h2>
+    <p>Stored as local JSON under <code>simulations/</code>. Results are held in memory for this server session only.</p>
+    <div id="savedCards" class="example-grid"><p class="muted">Loading saved simulations…</p></div>
+  </section>
+</div>
+
+<!-- ============ WORKSPACE VIEW ============ -->
+<div id="viewWorkspace" class="view" hidden>
   <section class="toolbar"><label>Saved simulations<select id="savedSelect"><option value="">Choose saved simulation…</option></select></label><label>Example templates<select id="templateSelect"><option value="">Choose an example…</option></select></label><button id="templateLoadBtn" class="subtle">Load example</button><span id="status" role="status">Ready</span></section>
-  <section class="intro card"><div><span class="eyebrow">START HERE</span><h1>Explore a stakeholder simulation</h1><p>Load the hypothetical Drug X launch example, run it, then compare how company, competitor, payer, physician, and patient choices change the modeled results.</p><p class="assumption-note">Example values are synthetic and illustrative. They are not market forecasts or clinical evidence.</p></div><button id="quickstartBtn" class="primary">Load Drug X example</button></section>
   <div class="layout">
     <div class="builder">
-      <section class="card"><h2>1. Simulation</h2><div class="grid"><label>Name<input id="name" value="New Simulation"></label><label>Definition ID<input id="simId" value="new-simulation"></label><label class="wide">Description<textarea id="description" rows="2"></textarea></label><label>Time horizon<input id="horizon" type="number" min="1" value="4"></label><label>Time step<input id="step" type="number" min="1" step="1" value="1"></label><label>Time unit<input id="stepUnit" value="round"></label><label>Decision policy<select id="decisionPolicy"><option value="rule_based">Rule-based</option><option value="llm">LLM fallback for ambiguous decisions</option></select><small class="field-note">The objective scorer selects decisive choices. The LLM is called when scores are tied or unavailable.</small></label><label>Forecast model<select id="forecast"><option value="state_metrics">State metrics</option><option value="launch_revenue">Launch revenue</option></select></label><label>Scenario policy<select id="policy"><option value="diversity">Diversity</option><option value="limited">Limited</option><option value="exhaustive">Exhaustive</option></select></label><label>Scenario limit<input id="limit" type="number" min="1" value="9"></label><label>Total node safety limit<input id="safety" type="number" min="1" value="1000"></label></div></section>
-      <section class="card"><h2>2. World</h2><p>Variables are stored as JSON values. Optional bounds and descriptions are editor metadata.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Min</th><th>Max</th><th>Description</th><th></th></tr></thead><tbody id="variables"></tbody></table></div><button id="addVariable" class="subtle">Add variable</button></section>
+      <section class="card"><h2>1. Simulation</h2><div class="grid"><label>Name<input id="name" value="New Simulation"></label><label>Definition ID<input id="simId" value="new-simulation"></label><label class="wide">Description<textarea id="description" rows="2"></textarea></label><label>Time horizon<input id="horizon" type="number" min="1" value="4"></label><label>Time step<input id="step" type="number" min="1" step="1" value="1"></label><label>Time unit<input id="stepUnit" value="round"></label><label>Decision policy<select id="decisionPolicy"><option value="rule_based">Rule-based</option><option value="llm">LLM fallback for ambiguous decisions</option></select><small class="field-note">The objective scorer selects decisive choices. The LLM is called only when scores are tied or unavailable.</small></label><label>Forecast model<select id="forecast"><option value="state_metrics">State metrics</option><option value="launch_revenue">Launch revenue</option></select></label><label>Scenario policy<select id="policy"><option value="diversity">Diversity</option><option value="limited">Limited</option><option value="exhaustive">Exhaustive</option></select></label><label>Scenario limit<input id="limit" type="number" min="1" value="9"></label><label>Total node safety limit<input id="safety" type="number" min="1" value="1000"></label></div></section>
+      <section class="card"><h2>2. World</h2><p>Variables are stored as JSON values. Bounds, descriptions, and evidence grades are editor metadata.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Min</th><th>Max</th><th>Description</th><th></th></tr></thead><tbody id="variables"></tbody></table></div><button id="addVariable" class="subtle">Add variable</button></section>
       <section class="card"><h2>3. Agents</h2><p>Edit stakeholder names, objectives, observations, and available actions with forms. You only need the advanced JSON editor for custom agent settings.</p><div id="agentsEditor" class="agent-editor"></div><button id="addAgent" class="subtle" type="button">Add agent</button><details class="advanced"><summary>Advanced agent settings (JSON)</summary><textarea id="agents" class="json" spellcheck="false"></textarea></details></section>
       <section class="card"><h2>4. Actions</h2><p>Actions define the choices agents can make and which state variables they affect. The loaded example is ready to run without editing these settings.</p><details class="advanced"><summary>Advanced action definitions (JSON)</summary><textarea id="actions" class="json" spellcheck="false"></textarea></details></section>
       <section class="card"><h2>5. Triggers</h2><p>Triggers determine when each agent gets to make a decision. The example already has these configured.</p><details class="advanced"><summary>Advanced trigger definitions (JSON)</summary><textarea id="triggers" class="json" spellcheck="false"></textarea></details></section>
-      <section class="card"><h2>6. Transitions &amp; Settings</h2><p>Advanced configuration for how events change the world and when they occur.</p><details class="advanced"><summary>Transition rules (JSON)</summary><textarea id="transitions" class="json short" spellcheck="false"></textarea></details><details class="advanced"><summary>Initial events (JSON)</summary><textarea id="initialEvents" class="json short" spellcheck="false"></textarea></details><details class="advanced"><summary>Scheduled events (JSON)</summary><textarea id="scheduledEvents" class="json short" spellcheck="false"></textarea></details></section>
-      <section class="card run-card"><h2>7. Run</h2><button id="validateBtn" class="subtle">Validate definition</button><button id="runBtn" class="primary">Run simulation</button><pre id="errors" class="errors"></pre></section>
+      <section class="card"><h2>6. External environment</h2>
+        <p>Drivers are outside forces — technology, regulation, pricing pressure — that change the world on a schedule. They are compiled into ordinary scheduled events and transition rules, so the same deterministic engine applies them.</p>
+        <p class="assumption-note">Driver strengths below are configured assumptions, not measurements. Variants let you compare worlds; they do not make any variant more true.</p>
+        <div id="driversEditor" class="agent-editor"></div>
+        <details class="advanced"><summary>Advanced driver definitions (JSON)</summary><textarea id="drivers" class="json" spellcheck="false"></textarea></details>
+      </section>
+      <section class="card"><h2>7. Transitions &amp; Settings</h2><p>Advanced configuration for how events change the world and when they occur.</p><details class="advanced"><summary>Transition rules (JSON)</summary><textarea id="transitions" class="json short" spellcheck="false"></textarea></details><details class="advanced"><summary>Initial events (JSON)</summary><textarea id="initialEvents" class="json short" spellcheck="false"></textarea></details><details class="advanced"><summary>Scheduled events (JSON)</summary><textarea id="scheduledEvents" class="json short" spellcheck="false"></textarea></details></section>
+      <section class="card run-card"><h2>8. Run</h2><button id="validateBtn" class="subtle">Validate definition</button><button id="runBtn" class="primary">Run simulation</button><div id="progress" class="progress" hidden><div class="progress-bar"><span id="progressBar"></span></div><p id="progressText" class="muted"></p></div><pre id="errors" class="errors"></pre></section>
     </div>
     <div class="results">
       <section class="card"><h2>Simulation summary</h2><div id="summary" class="summary muted">Run a simulation to view results.</div></section>
-      <section class="card"><h2>Scenario tree</h2><div id="tree" class="tree muted">The tree will appear here after a run.</div></section>
+      <section class="card"><h2>Assumptions &amp; evidence</h2><p>What is measured, what you assumed, and what is synthetic. Values are never silently promoted to facts.</p><div id="assumptions" class="muted">Run a simulation to see the evidence grading behind these results.</div></section>
+      <section class="card"><h2>Decision flowchart</h2><p>Generated from the recorded trace of this run — not a generic diagram. Counterfactual branches are shown dimmed; pruned branches are marked with the policy that removed them.</p><div id="flowchart" class="flow-wrap muted">The flowchart appears here after a run.</div></section>
       <section class="card"><h2>Scenario comparison</h2><div class="table-wrap"><table id="comparison"><thead></thead><tbody></tbody></table></div></section>
       <section class="card"><h2>Outcome charts</h2><p>Compare modeled outcomes across retained scenarios. Values come from the selected forecast model.</p><div id="charts" class="charts muted">Run a simulation to compare outcomes visually.</div></section>
-      <section class="card"><h2>Scenario detail</h2><div id="scenarioDetail" class="muted">Select a terminal scenario in the tree or comparison table.</div></section>
+      <section class="card"><h2>Variable time series</h2><p>World state recorded at each time step for every retained scenario.</p><div id="timeseries" class="charts muted">Run a simulation to plot state trajectories.</div></section>
+      <section class="card"><h2>External driver effects</h2><p>Every configured pathway that fired, with its lag, strength, and evidence grade.</p><div id="driverEffects" class="muted">This run has no external drivers, or none were active.</div></section>
+      <section class="card"><h2>Driver variant comparison</h2><p>Re-runs the current definition once per variant of one driver, without saving. Same agents, same rules — only the driver trajectory changes.</p><div id="variantComparison" class="muted">Use “Compare all variants” on a driver card to fill this panel.</div></section>
+      <section class="card"><h2>Decision audit</h2><p>Which layer chose each action: the objective scorer, a rule-based fallback, or an LLM. A fallback choice is a configured preference, not evidence of correctness.</p><div id="decisionAuditSummary" class="legend"></div><div class="table-wrap"><table id="decisionAudit"><thead></thead><tbody></tbody></table></div><div id="decisionAuditEmpty" class="muted">Run a simulation to audit decisions.</div></section>
+      <section class="card"><h2>Scenario tree</h2><details class="advanced"><summary>Full node tree (text)</summary><div id="tree" class="tree muted">The tree will appear here after a run.</div></details></section>
+      <section class="card"><h2>Scenario detail</h2><div id="scenarioDetail" class="muted">Select a terminal scenario in the flowchart, tree, or comparison table.</div></section>
     </div>
   </div>
+</div>
 </main>
 <script src="/static/app.js"></script>
+<script src="/static/guided.js"></script>
+<script src="/static/dashboard.js"></script>
 </body></html>

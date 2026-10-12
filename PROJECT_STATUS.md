@@ -1,5 +1,33 @@
 # Project status
 
+## Handover progress
+
+Phases 0–3 of the handover plan are complete. Phase 4 (OpenRouter integration) and Phase 5 (final evaluation refresh) are not started. No live or billable LLM call has been made; every test and example runs on deterministic, mock, or rule-based policies.
+
+Phase 0 snapshotted the existing work at commit `bcc41c7` before any change, so the pre-handover state is recoverable. No file was rewritten from scratch and no core architecture was replaced.
+
+Phase 1 restored a runnable suite. `%TEMP%\pytest-of-DELL` and the project `.pytest_cache` carry deny ACLs on this machine, so every `tmp_path` fixture errored during setup; `pyproject.toml` now points pytest at project-local basetemp and cache directories. Two generic-platform tests predated the hybrid objective scorer and still asserted that the launch example branches into 9 ambiguous alternatives. Decisive objective scoring intentionally collapses that to one retained branch, so the count assertion became the diversity-uniqueness property it was guarding, and the forecast regression is rebuilt on explicitly forced Payer counterfactuals. Every decision trace and scenario node now carries a `branch_role` of `selected` or `counterfactual`.
+
+Phase 2 added the external environment / macro-driver layer: configurable drivers (AI advances, regulation, tariffs, supply shocks) that compile into ordinary scheduled events plus transition rules, so driver effects pass through the same `StateTransitionSystem` and `DecisionValidator` as agent actions instead of getting a privileged execution path. Each driver carries variants, a time-dependent trajectory, per-pathway lag/strength/bounds, source, evidence grade, assumption labels, and an agent observation allowlist. The world-state pathway and the information pathway are kept separate; a `qualitative_only` pathway is reported as a hypothesis record and never converted into a state change. Bundled template: `examples/ai_drug_discovery.json`.
+
+Phase 3 added the guided UI: a home view with one-click example and saved-simulation cards, a guided external-driver editor with variant selection, staged run progress, an assumptions-and-evidence panel, a trace-generated decision flowchart, variable time-series charts, driver-effect and hypothesis tables, a decision audit table, and a driver-variant comparison built on a new non-persisting `POST /simulations/preview-run` endpoint. `GET /simulations/{id}/results` now returns the scenario tree inline, removing a round trip. Charts are hand-rolled SVG; no charting dependency was added.
+
+### Pre-existing defects fixed in Phase 3
+
+Both were present at baseline `bcc41c7` and confirmed as such by diffing against that commit, not introduced by the handover work.
+
+`examples/us_drug_launch.json` could not be loaded at all. Its `payer-review` and `physician-response` triggers subscribed to `evidence_update`, and `physician-response` also subscribed to `access_change`; nothing in the engine ever emits either event type, so builder validation rejected the flagship example. The two dead subscriptions were removed. No action, rule, or transition was added in their place, because roughly fifteen test files pin this example's exact numeric behavior and authoring a new event source would have meant inventing domain assumptions the handover forbids.
+
+`SimulationBuilderService.validate()` rejected valid transition rules. `StateTransitionSystem.apply_event` splits `rule.event_type` on commas and treats `"*"` as a wildcard, and the engine emits `action_transition` after every validated action, but validation compared the raw string against a set containing neither. Validation now splits on commas, skips `"*"`, and recognizes `action_transition`. The strictness that `tests/test_builder_service.py` pins for genuinely unknown event types is unchanged.
+
+### UI save-path data loss fixed in Phase 3
+
+`definitionFromForm()` rebuilt the definition from scratch out of the visible form fields, so saving from the UI silently dropped `evaluation_objectives` (all five for Drug X), `clinical_outcome_assumptions`, `patient_affordability_assumptions`, `metadata.domain`, `settings.transient_variables`, every `external_drivers` entry, each variable's `evidence_grade` and `assumption_labels`, and overwrote `scenario_generation.diversity_by_agents` (for Drug X, `["competitor", "payer"]` became all five agent ids, which changes pruning behavior). The loaded definition is now preserved as a base and the form merges into it, so fields the guided forms do not edit survive a round trip. This is verified in `tests/test_builder_ui_api.py` and by an in-browser round trip.
+
+### Verification
+
+166 tests pass (`python -m pytest -q`), including the 7 new UI/API tests in `tests/test_builder_ui_api.py`. All nine bundled and saved definitions validate. The UI was exercised in a real browser against `uvicorn` with zero console errors: example cards load and run, the driver editor round-trips guided fields while preserving pathways/variants/trajectory, variant comparison reproduces the Phase 2 values exactly without leaking a driver into the agent's own decision variable, flowchart terminal nodes open scenario detail, and disabling a driver empties the driver-effect panels. Screenshots were unavailable in this environment (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), so verification used DOM inspection and computed styles.
+
 ## Implemented and tested
 
 The MVP loads a simulation definition from JSON and executes sequential stakeholder decisions for Company, Competitor, Payer, Physician, and Patient. The example includes event triggers, per-path strategy/memory, observation filtering, deterministic action feasibility, isolated action previews, configurable objective scoring, a hybrid scorer/policy fallback, validated state transitions, scenario branching, and a one-quarter launch forecast.

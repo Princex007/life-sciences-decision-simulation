@@ -24,6 +24,46 @@ def _validate_or_422(definition: SimulationDefinition):
     except DefinitionValidationError as error:
         raise HTTPException(422, detail={"errors": error.errors}) from error
 
+def _results_payload(simulation_id: str, definition: SimulationDefinition, result, duration: float):
+    """Shared shape for stored runs and unsaved preview runs."""
+    return {"simulation_id": simulation_id, "summary": {
+        "terminal_scenarios": len(result.scenarios), "pruned_nodes": len(result.pruning_records),
+        "duration_seconds": duration, "forecast_model": definition.forecast_model_id,
+        "scenario_policy": definition.scenario_generation.policy,
+        "time_horizon": definition.settings.time_horizon,
+        "step_unit": definition.settings.step_unit,
+        "decision_policy": definition.settings.decision_policy,
+        "key_drivers": sorted({item.driver_id for item in result.driver_impacts}),
+        "assumption_labels": sorted({label for driver in definition.external_drivers
+                                     for label in driver.assumption_labels()}),
+        "variable_evidence": {name: {
+            "evidence_grade": meta.get("evidence_grade", ""),
+            "assumption_labels": meta.get("assumption_labels", []),
+            "description": meta.get("description", "")}
+            for name, meta in definition.world_variable_metadata.items()}},
+        "driver_impacts": [record.model_dump(mode="json") for record in result.driver_impacts],
+        "driver_hypotheses": [record.model_dump(mode="json") for record in result.driver_hypotheses],
+        "driver_evidence_grades": {driver.driver_id: driver.evidence_grade
+                                   for driver in definition.external_drivers},
+        "pruning_records": [record.model_dump(mode="json") for record in result.pruning_records],
+        "scenarios": [scenario.model_dump(mode="json") for scenario in result.scenarios]}
+
+@router.post("/simulations/preview-run")
+def preview_run(definition: SimulationDefinition):
+    """Run an unsaved definition without writing it to local storage.
+
+    Used to compare external-driver variants against the same baseline.
+    """
+    _validate_or_422(definition)
+    try:
+        result, duration = runner.run(definition)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    payload = _results_payload(definition.metadata.id, definition, result, duration)
+    payload["status"] = "preview"
+    payload["root"] = result.root.model_dump(mode="json")
+    return payload
+
 @router.get("/simulations/schema")
 def simulation_schema():
     return SimulationDefinition.model_json_schema()
@@ -38,8 +78,32 @@ def list_templates():
     templates = []
     for path in sorted(examples.glob("*.json")):
         definition = SimulationDefinition.from_json(str(path))
+        drivers = [driver for driver in definition.external_drivers if driver.enabled]
         templates.append({"id": path.stem, "name": definition.metadata.name,
-                          "description": definition.metadata.description})
+                          "description": definition.metadata.description,
+                          "summary": {
+                              "domain": definition.metadata.domain,
+                              "agents": [agent.name or agent.id for agent in definition.agents],
+                              "time_horizon": definition.settings.time_horizon,
+                              "step_unit": definition.settings.step_unit,
+                              "forecast_model": definition.forecast_model_id,
+                              "decision_policy": definition.settings.decision_policy,
+                              "max_scenarios": definition.scenario_generation.max_scenarios,
+                              "external_drivers": [
+                                  {"driver_id": driver.driver_id, "name": driver.name,
+                                   "category": driver.category,
+                                   "active_variant": driver.active_variant,
+                                   "variants": [{"variant_id": item.variant_id, "label": item.label,
+                                                 "description": item.description,
+                                                 "evidence_grade": item.evidence_grade}
+                                                for item in driver.variants]}
+                                  for driver in drivers],
+                              "evidence_grades": sorted({
+                                  grade for grade in [
+                                      definition.world_variable_metadata.get(name, {}).get("evidence_grade")
+                                      for name in definition.initial_world_state.as_variables()]
+                                  if grade}),
+                          }})
     return templates
 
 @router.get("/simulations/templates/{template_id}")
@@ -54,7 +118,12 @@ def get_template(template_id: str):
 @router.get("/simulations")
 def list_simulations():
     return [{"simulation_id": item.metadata.id, "name": item.metadata.name,
-             "description": item.metadata.description} for item in builder.list()]
+             "description": item.metadata.description,
+             "domain": item.metadata.domain,
+             "agent_count": len(item.agents),
+             "time_horizon": item.settings.time_horizon,
+             "external_driver_count": len([d for d in item.external_drivers if d.enabled]),
+             "has_results": item.metadata.id in _results} for item in builder.list()]
 
 @router.post("/simulations", status_code=201)
 def create_simulation(definition: SimulationDefinition):
@@ -132,12 +201,11 @@ def get_results(simulation_id: str):
     stored = _results.get(simulation_id)
     if not stored:
         raise HTTPException(409, "Simulation has not been run")
-    definition, result = builder.get(simulation_id), stored["result"]
-    return {"simulation_id": simulation_id, "summary": {
-        "terminal_scenarios": len(result.scenarios), "pruned_nodes": len(result.pruning_records),
-        "duration_seconds": stored["duration_seconds"], "forecast_model": definition.forecast_model_id,
-        "scenario_policy": definition.scenario_generation.policy},
-        "scenarios": [scenario.model_dump(mode="json") for scenario in result.scenarios]}
+    definition = builder.get(simulation_id)
+    payload = _results_payload(simulation_id, definition, stored["result"],
+                               stored["duration_seconds"])
+    payload["root"] = stored["result"].root.model_dump(mode="json")
+    return payload
 
 @router.get("/simulations/{simulation_id}/tree")
 def get_tree(simulation_id: str):
