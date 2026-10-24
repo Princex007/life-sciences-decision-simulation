@@ -1,8 +1,7 @@
-# Secrets — never commit provider credentials
+# Secrets — never commit provider credentials, or a template an author might paste a key into
 .env
 .env.*
-!.env.example
-!examples/*.env.example
+*.env.example
 
 # Python
 __pycache__/

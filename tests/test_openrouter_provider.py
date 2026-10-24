@@ -18,6 +18,26 @@ PROJECT = Path(__file__).resolve().parents[1]
 SMOKE_EXAMPLE = PROJECT / "tests" / "fixtures" / "local_multi_agent_smoke.json"
 
 
+def _git_output(*args: str) -> list[str] | None:
+    """git stdout split into lines, or None when git is unavailable here."""
+    import subprocess
+
+    try:
+        completed = subprocess.run(("git", *args), cwd=PROJECT, capture_output=True, text=True)
+    except OSError:
+        return None
+    return completed.stdout.split() if completed.returncode == 0 else None
+
+
+def _is_ignored(path: str) -> bool | None:
+    import subprocess
+
+    try:
+        return subprocess.run(("git", "check-ignore", "-q", path), cwd=PROJECT).returncode == 0
+    except OSError:
+        return None
+
+
 class FakeHTTPResponse:
     def __init__(self, payload: bytes):
         self._payload = payload
@@ -176,15 +196,14 @@ def test_settings_describe_never_includes_the_key(monkeypatch):
     assert "api_key" not in described
 
 
-def test_bundled_env_example_carries_placeholders_only():
-    text = (PROJECT / ".env.example").read_text(encoding="utf-8")
-    keys = {key: value for key, value in
-            (line.split("=", 1) for line in text.splitlines()
-             if "=" in line and not line.strip().startswith("#"))}
-    assert keys["OPENROUTER_API_KEY"] == "sk-or-v1-REPLACE_WITH_YOUR_KEY"
-    assert "REPLACE_WITH" in keys["OPENROUTER_MODEL"]
-    gitignore = (PROJECT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert ".env" in gitignore
+def test_no_env_template_is_shipped_in_version_control():
+    tracked = _git_output("ls-files")
+    if tracked is None:
+        pytest.skip("not a git checkout")
+    shipped = [path for path in tracked if path.endswith(".env") or path.endswith(".env.example")]
+    assert shipped == [], f"environment template must never be published: {shipped}"
+    for probe in (".env", ".env.example", "examples/local_llm.env.example"):
+        assert _is_ignored(probe) is True, f"{probe} must stay out of version control"
 
 
 # --- wire behaviour ---------------------------------------------------------
