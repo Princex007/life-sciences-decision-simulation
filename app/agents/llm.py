@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -22,6 +23,12 @@ PROMPT_CONTEXT_VERSION = "decision-context-v2"
 # Only transport-level failures are retried; a response rejected by validation is
 # never resubmitted, so an unusable model output cannot multiply into spend.
 RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+# A throttled request never reached the model, so waiting it out spends nothing.
+# These get a longer budget than an ordinary transport failure because providers
+# measure their free-tier windows in seconds or minutes, not half-seconds.
+RATE_LIMIT_STATUS_CODES = frozenset({429, 503})
+RATE_LIMIT_MAX_ATTEMPTS = 5
+RATE_LIMIT_MAX_WAIT_SECONDS = 30.0
 
 
 class DecisionPrompt(BaseModel):
@@ -291,10 +298,12 @@ class OpenAICompatibleLLMClient:
             headers["X-Title"] = self.application
         return headers
 
-    def _wait_before_retry(self, attempt: int, reason: str) -> None:
-        delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
-        logger.warning("LLM provider attempt %d/%d failed (%s); retrying in %.2fs.",
-                       attempt, self.max_attempts, reason, delay)
+    def _wait_before_retry(self, attempt: int, reason: str,
+                           delay: float | None = None) -> None:
+        if delay is None:
+            delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
+        logger.warning("LLM provider attempt %d failed (%s); retrying in %.2fs.",
+                       attempt, reason, delay)
         if delay > 0:
             time.sleep(delay)
 
@@ -313,6 +322,19 @@ class OpenAICompatibleLLMClient:
             payload_data["max_tokens"] = self.max_output_tokens
         if not local_provider:
             payload_data["response_format"] = {"type": "json_object"}
+        return self._post(payload_data)
+
+    def generate_json(self, prompt: DecisionPrompt) -> LLMCompletion:
+        """One structured-JSON completion for non-decision requests, same retry policy."""
+        payload_data = {"model": self.model, "temperature": self.temperature,
+            "messages": [{"role": "system", "content": prompt.system},
+                         {"role": "user", "content": prompt.user}],
+            "response_format": {"type": "json_object"}}
+        if self.max_output_tokens:
+            payload_data["max_tokens"] = self.max_output_tokens
+        return self._post(payload_data)
+
+    def _post(self, payload_data: dict) -> LLMCompletion:
         payload = json.dumps(payload_data).encode("utf-8")
         request = Request(self.base_url + "/chat/completions", data=payload, method="POST",
             headers=self._headers())
@@ -325,10 +347,21 @@ class OpenAICompatibleLLMClient:
                     envelope = json.loads(response.read().decode("utf-8"))
                 break
             except HTTPError as error:
-                if error.code in RETRYABLE_STATUS_CODES and attempts < self.max_attempts:
-                    self._wait_before_retry(attempts, f"HTTP {error.code}")
-                    continue
-                raise LLMClientError(f"LLM provider returned HTTP {error.code}.") from None
+                if error.code not in RETRYABLE_STATUS_CODES:
+                    raise LLMClientError(f"LLM provider returned HTTP {error.code}.") from None
+                throttled = error.code in RATE_LIMIT_STATUS_CODES
+                budget = max(self.max_attempts, RATE_LIMIT_MAX_ATTEMPTS) if throttled else self.max_attempts
+                if attempts >= budget:
+                    if not throttled:
+                        raise LLMClientError(f"LLM provider returned HTTP {error.code}.") from None
+                    raise LLMClientError(
+                        f"LLM provider is rate limiting this model (HTTP {error.code} after "
+                        f"{attempts} attempts). Try again in a minute.") from None
+                delay = _retry_after_seconds(error) if throttled else None
+                if delay is None and throttled:
+                    delay = min(2.0 * (2 ** (attempts - 1)), RATE_LIMIT_MAX_WAIT_SECONDS)
+                self._wait_before_retry(attempts, f"HTTP {error.code}", delay)
+                continue
             except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
                 if attempts < self.max_attempts:
                     self._wait_before_retry(attempts, type(error).__name__)
@@ -344,6 +377,18 @@ class OpenAICompatibleLLMClient:
         return LLMCompletion(content=content, provider=self.provider, model=self.model,
                              model_version=envelope.get("model"), latency_ms=round(latency_ms, 3),
                              token_usage=_token_usage(envelope.get("usage")), attempts=attempts)
+
+
+def _retry_after_seconds(error: HTTPError) -> float | None:
+    """Seconds a throttling provider asked us to wait, capped so a request cannot stall."""
+    raw = (error.headers or {}).get("Retry-After", "")
+    try:
+        seconds = float(str(raw).strip())
+    except ValueError:
+        return None
+    if math.isnan(seconds) or seconds < 0:
+        return None
+    return min(seconds, RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
 def _token_usage(usage: object) -> dict[str, int]:

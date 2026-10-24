@@ -1,0 +1,12 @@
+{
+  "history_id": "illustrative-rival-share-ramp",
+  "name": "Illustrative rival product share ramp",
+  "description": "Eight illustrative quarterly market-share readings for a different product's launch, shipped so reference-based forecasting has a second series to borrow a shape from. Not real product data.",
+  "values": [0.02, 0.05, 0.09, 0.15, 0.21, 0.27, 0.31, 0.34],
+  "variable": "market_share",
+  "unit": "market share as a fraction (0-1)",
+  "cadence": "quarter",
+  "source": "Bundled illustrative fixture",
+  "evidence_grade": "synthetic_illustrative",
+  "assumption_label": "Illustrative rival-launch shape. The borrowed ramp is not this product's own history, and the peak it is scaled to is your assumption, not a measurement."
+}

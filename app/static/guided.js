@@ -24,11 +24,15 @@ function configuredAgents(){try{return JSON.parse(agentBox.value||'[]');}catch{r
 /* ---------------- landing view ---------------- */
 async function refreshHome(){
   try{
-    const [templates,savedList]=await Promise.all([refreshTemplates(),refreshSaved()]);
-    renderExampleCards(templates);renderSavedCards(savedList);
+    /* refreshSaved() redraws the saved cards, so only examples are drawn here.
+       The forecast catalog and stored histories feed the builder, so they load with it. */
+    const [templates]=await Promise.all([refreshTemplates(),refreshSaved(),refreshForecastModels(),refreshHistories()]);
+    renderExampleCards(templates);
   }catch(error){
+    console.error('refreshHome', error);
     byId('exampleCards').replaceChildren(note(`Could not load examples: ${error.message}`,'assumption-note'));
     byId('savedCards').replaceChildren(note(`Could not load saved simulations: ${error.message}`,'assumption-note'));
+    byId('forecastNote').textContent=`The forecast model catalog and stored histories could not be loaded: ${error.message}`;
   }
 }
 function exampleCard(item){
@@ -87,7 +91,7 @@ function startBlank(){
   definition.metadata.id=`new-simulation-${String(Date.now()).slice(-6)}`;
   loadDefinition(definition,false);
   saved=false;currentId=null;
-  setStatus('Blank simulation ready. Add world variables and agents, then validate before running.');
+  setStatus('Blank simulation ready. Add world variables, then agents with actions and a trigger, and run.');
 }
 async function initHome(){
   byId('homeBtn').onclick=async()=>{await refreshHome();showHome();};
@@ -158,6 +162,7 @@ function renderDrivers(drivers){
     card.addEventListener('input',syncDriversFromForm);card.addEventListener('change',syncDriversFromForm);
     root.append(card);
   });
+  attachHints(root);
 }
 function driverControl(labelText,element){const label=document.createElement('label');label.className='agent-field';label.append(document.createTextNode(labelText),element);return label;}
 function textInput(value,driver,field){const input=document.createElement('input');input.value=value;input.dataset.field=field;return input;}
@@ -268,6 +273,7 @@ async function compareVariants(index){
     }
     renderVariantComparison(driver,runs);
     showWorkspace();
+    showTab('environment');
     setProgress(`Compared ${runs.length} variants of “${driver.name}”.`,100);
     setStatus(`Variant comparison complete: ${runs.length} runs`);
     setTimeout(hideProgress,2200);

@@ -79,7 +79,7 @@ def test_json_launch_example_reproducible_and_forecast_is_plugin():
     assert scored and all(t.branch_role == "selected" for t in scored)
     assert all(s.forecast is not None for s in first.scenarios)
     class FixedForecast:
-        def forecast(self, final_state, snapshots, scenario):
+        def forecast(self, final_state, snapshots, scenario, context=None):
             from app.domain.outcome import Outcome
             return Outcome(metrics={"custom": 42})
     registry = ForecastRegistry()
@@ -132,7 +132,8 @@ def test_default_rule_policy_uses_arbitrary_agent_action_ids():
     result = SimulationEngine().run(definition)
     assert {action.action_id for action in result.scenarios[0].actions} == {"increment", "approve"}
 
-def test_same_strategy_is_not_reapplied_at_later_trigger():
+def test_same_strategy_is_reapplied_at_later_trigger():
+    """The same action may fire again on a later tick; only same-tick repeats are deduplicated."""
     definition = SimulationDefinition.model_validate({
         "metadata":{"id":"persistent","name":"Persistent"},
         "initial_world_state":{"variables":{"count":0}},
@@ -141,8 +142,51 @@ def test_same_strategy_is_not_reapplied_at_later_trigger():
         "trigger_definitions":[{"id":"start","event_types":["simulation_start","review"],"affected_agents":["a"]}],
         "settings":{"time_horizon":2,"initial_events":[{"id":"start","time":0,"event_type":"simulation_start"}],"scheduled_events":[{"id":"review","time":2,"event_type":"review"}]}})
     terminal = SimulationEngine().run(definition).scenarios[0]
-    assert terminal.final_state.get("count") == 1
+    assert terminal.final_state.get("count") == 2
     assert len([trace for trace in terminal.decision_trace if trace.event_type == "decision" and trace.agent_id == "a"]) == 2
+
+def test_same_strategy_is_not_reapplied_twice_in_one_tick():
+    """Two matching events in the same tick must not double-apply one action's effects."""
+    definition = SimulationDefinition.model_validate({
+        "metadata":{"id":"same-tick","name":"Same tick"},
+        "initial_world_state":{"variables":{"count":0}},
+        "agents":[{"id":"a","name":"A","objective":"increment","available_actions":["once"],"decision_policy":{"default_actions":["once"]}}],
+        "action_definitions":[{"id":"once","name":"Once","agent_id":"a","effects":[{"variable":"count","operation":"add","value":1}]}],
+        "trigger_definitions":[{"id":"start","event_types":["ping"],"affected_agents":["a"]}],
+        "settings":{"time_horizon":1,"initial_events":[{"id":"e1","time":0,"event_type":"ping"}],
+                    "scheduled_events":[{"id":"e2","time":0,"event_type":"ping"}]}})
+    terminal = SimulationEngine().run(definition).scenarios[0]
+    assert terminal.final_state.get("count") == 1
+    decisions = [trace for trace in terminal.decision_trace
+                 if trace.event_type == "decision" and trace.agent_id == "a" and trace.time == 0]
+    assert len(decisions) == 1
+
+def test_invalid_decision_does_not_starve_other_agents_or_shadow_later_events():
+    """An agent with no feasible actions must not block same-tick peers, and the
+    tick's events must not leak into later ticks once the tick is resolved."""
+    definition = SimulationDefinition.model_validate({
+        "metadata":{"id":"no-starve","name":"No starve"},
+        "initial_world_state":{"variables":{"count":0}},
+        "agents":[
+            {"id":"a-noact","name":"No actions","objective":"do nothing","available_actions":[]},
+            {"id":"b-act","name":"Actor","objective":"increment","available_actions":["bump"],
+             "decision_policy":{"default_actions":["bump"]}}],
+        "action_definitions":[{"id":"bump","name":"Bump","agent_id":"b-act",
+            "effects":[{"variable":"count","operation":"add","value":1}]}],
+        "trigger_definitions":[
+            {"id":"start","event_types":["simulation_start"],"affected_agents":["a-noact","b-act"]},
+            {"id":"round","event_types":["round"],"affected_agents":["b-act"]}],
+        "settings":{"time_horizon":1,
+            "initial_events":[{"id":"start","time":0,"event_type":"simulation_start"}],
+            "scheduled_events":[{"id":"r1","time":1,"event_type":"round"}]}})
+    terminal = SimulationEngine().run(definition).scenarios[0]
+    by_agent = {}
+    for trace in terminal.decision_trace:
+        if trace.event_type == "decision":
+            by_agent.setdefault(trace.agent_id, []).append(trace)
+    assert len(by_agent["a-noact"]) == 1 and by_agent["a-noact"][0].validation_status == "invalid"
+    assert [(trace.time, trace.validation_status) for trace in by_agent["b-act"]] == [(0, "valid"), (1, "valid")]
+    assert terminal.final_state.get("count") == 2
 
 def test_payer_review_policy_prevents_unjustified_downgrade():
     _, result = run("examples/us_drug_launch.json")

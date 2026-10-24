@@ -14,6 +14,7 @@ from app.domain.scenario import Scenario, SimulationResult
 from app.domain.world import WorldState
 from app.forecasting.clinical_outcomes import expected_clinical_outcomes
 from app.forecasting.patient_affordability import estimate_patient_cost
+from app.forecasting.context import ForecastContext
 from app.forecasting.registry import ForecastRegistry
 from .scenario_generator import ScenarioGenerator, SimulationPath
 from .external_drivers import apply_external_drivers
@@ -45,12 +46,32 @@ class SimulationEngine:
                  decision_policy: DecisionPolicy | None = None,
                  observation_model: ObservationModel | None = None,
                  evidence_store: EvidenceStore | None = None,
-                 evidence_retriever: EvidenceRetriever | None = None):
+                 evidence_retriever: EvidenceRetriever | None = None,
+                 history_store=None):
         self.forecast_registry = forecast_registry or ForecastRegistry()
         self.decision_policy = decision_policy or RuleBasedDecisionPolicy()
         self.observation_model = observation_model or ObservationModel()
         self.evidence_store = evidence_store
         self.evidence_retriever = evidence_retriever or RuleBasedEvidenceRetriever()
+        self.history_store = history_store
+
+    def _stored_history(self, history_id, label):
+        """Resolve a series the definition points at; both stored-series models share this."""
+        if not history_id:
+            return None
+        if self.history_store is None:
+            raise ValueError(f"Simulation selects {label} '{history_id}' "
+                             "but no history store is configured.")
+        try:
+            return self.history_store.get(history_id)
+        except FileNotFoundError as error:
+            raise ValueError(str(error)) from error
+
+    def _history_for(self, definition: SimulationDefinition):
+        return self._stored_history(definition.product_history_id, "product history")
+
+    def _reference_history_for(self, definition: SimulationDefinition):
+        return self._stored_history(definition.reference_history_id, "reference product history")
 
     def run(self, definition: SimulationDefinition) -> SimulationResult:
         definition, driver_plan = apply_external_drivers(definition)
@@ -64,6 +85,10 @@ class SimulationEngine:
         evidence_store = self.evidence_store or InMemoryEvidenceStore(definition.evidence)
         root_path, root = generator.root_path(definition.initial_world_state, definition.agents)
         paths = [root_path]
+        # Driver, historical and reference forecasts read run inputs that are not world
+        # state, so they get them through one context built for this run.
+        forecast_context = ForecastContext(definition=definition, history=self._history_for(definition),
+                                           reference_history=self._reference_history_for(definition))
         for time in range(0, settings.time_horizon + 1):
             if time:
                 advanced = []
@@ -76,7 +101,8 @@ class SimulationEngine:
                     advanced.append(path)
                 paths = advanced
             events = scheduler.initial_events() if time == 0 else scheduler.scheduled_events(time)
-            paths = self._resolve(paths, events, time, definition, scheduler, generator, transition, policy, evidence_store)
+            paths = self._resolve(paths, events, time, definition, scheduler, generator, transition, policy,
+                                evidence_store, forecast_context)
         scenarios = []
         key_drivers = sorted(set(driver_plan.active_driver_ids))
         for index, path in enumerate(paths, 1):
@@ -88,7 +114,7 @@ class SimulationEngine:
             forecast_id = definition.forecast_model_id
             if forecast_id:
                 model = self.forecast_registry.get(forecast_id)
-                scenario.forecast = model.forecast(path.world, path.snapshots, scenario)
+                scenario.forecast = model.forecast(path.world, path.snapshots, scenario, forecast_context)
             scenarios.append(scenario)
         result = SimulationResult(simulation_id=definition.metadata.id, name=definition.metadata.name,
             root=root, scenarios=scenarios, pruning_records=generator.pruning_records,
@@ -98,12 +124,14 @@ class SimulationEngine:
             result.llm_usage = usage_summary()
         return result
 
-    def _resolve(self, paths, events, time, definition, scheduler, generator, transition, policy, evidence_store):
+    def _resolve(self, paths, events, time, definition, scheduler, generator, transition, policy,
+                 evidence_store, forecast_context=None):
         for path in paths:
             path.decided_agents.clear()
         while True:
             next_paths = []
             did_branch = False
+            did_decide = False
             for path in paths:
                 previous = getattr(path, "_previous_world", None)
                 path_events = getattr(path, "_pending_events", events)
@@ -166,7 +194,8 @@ class SimulationEngine:
                     forecast_model = (self.forecast_registry.get(definition.forecast_model_id)
                                       if needs_forecast and definition.forecast_model_id else None)
                     context.action_previews = self._build_action_previews(
-                        path.world, agent, proposed, definition, transition, time, forecast_model)
+                        path.world, agent, proposed, definition, transition, time, forecast_model,
+                        forecast_context)
                     if objective is None:
                         context.decision_source = decision_source_for(policy)
                         response = policy.decide(context, proposed)
@@ -202,9 +231,11 @@ class SimulationEngine:
                         if scores is None:
                             context.objective_scores = {}
                             context.objective_score_margin = None
-                            context.decision_reason = f"Objective scoring unavailable ({score_error}); used existing policy."
+                            context.decision_reason = (f"Objective scoring unavailable ({score_error}); "
+                                                       "delegated to the configured decision policy.")
                             context.decision_source = "existing_policy_fallback"
                             response = policy.decide(context, proposed)
+                            context.decision_source = decision_source_for(policy)
                         else:
                             context.objective_scores = scores
                             context.objective_score_margin = margin
@@ -295,10 +326,12 @@ class SimulationEngine:
                 alternative_reason = response.rationale
                 audit = policy.audit_for(context, response, response.validation_status,
                     response.validation_errors, response.primary_action if requested else None) \
-                    if proposed and hasattr(policy, "audit_for") else None
+                    if proposed and hasattr(policy, "audit_for") \
+                    and context.decision_source != "objective_scorer" else None
                 if not definitions:
                     generator.record_invalid_decision(path, agent, match, context, response, audit)
                     path.decided_agents.add(agent.id)
+                    did_decide = True
                     path._pending_events = path_events
                     next_paths.append(path)
                     continue
@@ -322,7 +355,10 @@ class SimulationEngine:
                     next_paths.append(child)
                 did_branch = True
             paths = next_paths
-            if not did_branch:
+            if not did_branch and not did_decide:
+                for path in paths:
+                    if hasattr(path, "_pending_events"):
+                        del path._pending_events
                 return generator.prune(paths, time)
 
     @staticmethod
@@ -341,7 +377,7 @@ class SimulationEngine:
 
     @staticmethod
     def _build_action_previews(world, agent, actions, definition, transition, time,
-                               forecast_model=None):
+                               forecast_model=None, forecast_context=None):
         """Calculate candidate consequences on isolated states using configured transitions."""
         derived_effects = {}
         for configured_action in definition.action_definitions:
@@ -393,7 +429,8 @@ class SimulationEngine:
             if forecast_model is not None:
                 try:
                     outcome = forecast_model.forecast(next_step_state.model_copy(deep=True),
-                        [world.model_copy(deep=True), next_step_state.model_copy(deep=True)], None)
+                        [world.model_copy(deep=True), next_step_state.model_copy(deep=True)], None,
+                        forecast_context)
                     forecast_metrics = dict(outcome.metrics)
                 except Exception as error:
                     logger.warning("Forecast preview unavailable for candidate %s (%s)",

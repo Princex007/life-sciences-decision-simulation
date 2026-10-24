@@ -52,9 +52,11 @@ def test_actual_example_runs_auditable_five_agent_decision_path(monkeypatch):
     monkeypatch.setattr(DecisionValidator, "filter_feasible_actions", track_feasible)
 
     original_previews = SimulationEngine._build_action_previews
-    def track_previews(world, agent, actions, scenario, transition, time, forecast_model=None):
+    def track_previews(world, agent, actions, scenario, transition, time, forecast_model=None,
+                       forecast_context=None):
         before = world.model_dump(mode="python")
-        result = original_previews(world, agent, actions, scenario, transition, time, forecast_model)
+        result = original_previews(world, agent, actions, scenario, transition, time, forecast_model,
+                                   forecast_context)
         assert world.model_dump(mode="python") == before
         candidate_ids = {action.id for action in actions}
         assert set(result) == candidate_ids

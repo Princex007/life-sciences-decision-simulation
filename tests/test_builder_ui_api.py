@@ -56,7 +56,9 @@ def test_template_list_exposes_summary_for_example_cards(client):
     response = client.get("/simulations/templates")
     assert response.status_code == 200
     templates = {item["id"]: item for item in response.json()}
-    assert set(templates) >= {"us_drug_launch", "ai_drug_discovery", "market_pricing_competition"}
+    # The picker is curated, so its contents are pinned exactly: a template that stops being
+    # maintained has to leave the list, and nothing may appear here by accident.
+    assert set(templates) == {"ai_drug_discovery", "us_drug_launch"}
 
     driver_example = templates["ai_drug_discovery"]["summary"]
     assert driver_example["time_horizon"] == 5
@@ -75,7 +77,7 @@ def test_template_list_exposes_summary_for_example_cards(client):
 
 
 def test_saved_list_exposes_ui_metadata(client):
-    definition = client.get("/simulations/templates/market_pricing_competition").json()
+    definition = client.get("/simulations/templates/us_drug_launch").json()
     assert client.post("/simulations", json=definition).status_code == 201
     items = client.get("/simulations").json()
     assert len(items) == 1
@@ -84,7 +86,7 @@ def test_saved_list_exposes_ui_metadata(client):
         "name": definition["metadata"]["name"],
         "description": definition["metadata"]["description"],
         "domain": definition["metadata"]["domain"],
-        "agent_count": 3,
+        "agent_count": 5,
         "time_horizon": definition["settings"]["time_horizon"],
         "external_driver_count": 0,
         "has_results": False,
@@ -151,7 +153,7 @@ def test_preview_run_compares_variants_without_persisting(client, tmp_path):
 
 
 def test_preview_run_rejects_invalid_definitions(client):
-    definition = client.get("/simulations/templates/market_pricing_competition").json()
+    definition = client.get("/simulations/templates/us_drug_launch").json()
     definition["trigger_definitions"][0]["event_types"] = ["never_emitted"]
     response = client.post("/simulations/preview-run", json=definition)
     assert response.status_code == 422

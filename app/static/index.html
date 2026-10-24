@@ -2,10 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Simulation Builder</title><link rel="stylesheet" href="/static/style.css">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Deterministic stakeholder decision simulation workbench. Illustrative model outputs, not market forecasts or clinical evidence.">
+  <title>Simulation Builder</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b2b2a'/%3E%3Cpath d='M16 8v6M16 14l-6 6M16 14l6 6' stroke='%233ea398' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='7' r='2.5' fill='%233ea398'/%3E%3Ccircle cx='9' cy='22' r='2.5' fill='%23e2f2ee'/%3E%3Ccircle cx='23' cy='22' r='2.5' fill='%23e2f2ee'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css?v=20">
 </head>
 <body>
-<header><div><strong>Life Sciences Decision Simulation &amp; Forecasting</strong><span>Local Simulation Builder</span></div><div class="header-actions"><button id="homeBtn" class="subtle">Home</button><button id="newBtn" class="subtle">New</button><button id="duplicateBtn" class="subtle">Duplicate</button><button id="saveBtn">Save Simulation</button><button id="loadBtn" class="subtle">Load Simulation</button></div></header>
+<header><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 8v6M16 14l-6 6M16 14l6 6" stroke="#eafaf6" stroke-width="2.2" stroke-linecap="round"/><circle cx="16" cy="7" r="2.6" fill="#eafaf6"/><circle cx="9" cy="22" r="2.6" fill="#9dc0b8"/><circle cx="23" cy="22" r="2.6" fill="#9dc0b8"/></svg></span><div class="brand-text"><strong>Life Sciences Decision Simulation &amp; Forecasting</strong><span>Deterministic stakeholder decision workbench</span></div></div><div class="header-actions"><button id="homeBtn" class="subtle" data-hint="Back to the landing page. Your current edits stay in the form until you replace them.">Home</button><button id="newBtn" class="subtle" data-hint="Start a blank simulation. Replaces the current form; unsaved edits are lost.">New</button><button id="duplicateBtn" class="subtle" data-hint="Save the current definition as a new copy with its own ID, then load the copy. The original is untouched.">Duplicate</button><button id="saveBtn" data-hint="Write this definition to simulations/&lt;definition ID&gt;.json. Results are not stored — they live in this server session only.">Save Simulation</button><button id="loadBtn" class="subtle" data-hint="Load the simulation chosen in the Saved simulations list. Replaces the current form.">Load Simulation</button><button id="discardBtn" class="subtle" data-hint="Delete the saved file for the simulation currently open, then clear the editor. Asks first; a deleted file is not recoverable.">Discard</button></div></header>
 
 <main>
 <!-- ============ LANDING VIEW ============ -->
@@ -33,6 +37,110 @@
     <p>Stored as local JSON under <code>simulations/</code>. Results are held in memory for this server session only.</p>
     <div id="savedCards" class="example-grid"><p class="muted">Loading saved simulations…</p></div>
   </section>
+
+  <section class="card" id="forecaster">
+    <h2>Time Series Forecasting</h2>
+    <p>Extrapolate an observed time series using a deterministic trend fitted to its historical values. Import a CSV or Excel file, or paste the numbers, and project that history forward. It is its own option, separate from a simulation, and uses the same deterministic straight-line fit as the Trend projection forecast model, so a number produced here matches the same number produced inside a run.</p>
+    <p class="assumption-note">This draws a line through the numbers you give it. That is an extrapolation of the recent trend, not a causal forecast, and it has no confidence interval. The fit error is reported so you can judge how straight the line really is.</p>
+    <h3>Inputs</h3>
+    <div class="grid">
+      <label>Import a CSV or Excel file<input id="tsFile" type="file" accept=".csv,.txt,.xlsx,.xlsm" data-hint="Reads every column that holds at least two plain numbers. The file is sent to this local server for parsing only — nothing is written to disk until you save a series, and only the column you pick becomes the history. Dates and percent-formatted text are never read as numbers.">
+      </label>
+      <label id="tsSheetWrap" hidden>Sheet<select id="tsSheet" data-hint="Which worksheet of the workbook to read. Only the selected sheet is parsed."></select></label>
+      <label id="tsColumnWrap" hidden>Column to forecast<select id="tsColumn" data-hint="One numeric column from the imported file, oldest row first. Picking it fills the observed values below and projects them immediately."></select></label>
+    </div>
+    <p class="field-note" id="tsImportNote">Or paste the numbers below instead.</p>
+    <div class="grid">
+      <label class="wide">Observed values (oldest period first)<input id="tsValues" type="text" placeholder="120, 132, 141, 158, 171" data-hint="Two or more numbers separated by commas or spaces. Each value is one period, in the unit and cadence stated below. Missing periods are not interpolated: the values you enter are treated as consecutive periods. Filled in for you when you import a file."></label>
+      <label>Unit of these values (optional)<input id="tsUnit" type="text" placeholder="e.g. revenue in USD thousands, treated patients" data-hint="What one number means, including its scale. Left blank, the result table and charts say “series units” instead of a unit. Saved with the series when you store it as a product history, so an analogue forecast can name the metric it is borrowing."></label>
+      <label>What one period is<select id="tsCadence" data-hint="The cadence the observed values were recorded at. It changes only the wording of the horizon and the results — the fit treats each value as one period either way. Saved with the series as a product history.">
+        <option value="period">period (cadence unstated)</option>
+        <option value="quarter">quarter</option>
+        <option value="month">month</option>
+        <option value="year">year</option>
+        <option value="week">week</option>
+      </select></label>
+      <label><span id="tsAheadLabel">Forecast horizon (periods)</span><input id="tsAhead" type="number" min="1" max="60" value="4" data-hint="How many future periods to project, counted after the last observed value. Required: a blank horizon is refused rather than guessed. Past the observed span the line has no evidence under it."></label>
+      <label>Series name (optional)<input id="tsLabel" type="text" placeholder="Quarterly revenue" data-hint="Names the series in the result table and chart, and becomes the stored product history name if you save it. Set from the imported column header when you import a file."></label>
+    </div>
+    <button id="tsRunBtn" class="primary" data-hint="Sends the values and horizon above to this local server for the deterministic least-squares fit, then draws the fitted line, the projection and the period table below. Nothing is saved and no provider is called: the observed series is only stored if you choose the save button beside this one.">Generate Time Series Forecast</button>
+    <button id="tsSaveBtn" class="subtle" type="button" disabled data-hint="Stores the observed values you entered — never the projected ones — in histories/, with their unit, cadence and source, so the Stored product history and Analogue-Based Forecasting panels can use them. A projection stays a projection.">Save observed series as product history</button>
+    <p class="field-note" id="tsSavedNote"></p>
+    <pre id="tsErrors" class="errors"></pre>
+    <div id="tsResult" class="muted">Enter at least two observed values and a forecast horizon, then choose Generate Time Series Forecast.</div>
+  </section>
+
+  <section class="card" id="forecasterReference">
+    <h2>Analogue-Based Forecasting</h2>
+    <p>Estimate a target product's trajectory by scaling the observed trajectory of a comparable reference product to a target peak you specify. The reference series is a DIFFERENT product's recorded history; its shape is multiplied by one factor so its own highest reading lands on the peak you enter, then that rescaled shape is fitted and projected. No simulation is run — this is the same arithmetic the Reference product analogue forecast model uses inside a run.</p>
+    <p class="assumption-note">One multiplier preserves the borrowed series' relative growth and converts nothing else: the peak you enter must be stated in the same metric and unit as the series you are borrowing, because a factor cannot turn patients into share. The projection is only as good as the claim that these two products launch alike.</p>
+    <h3>Inputs</h3>
+    <div class="grid">
+      <label class="wide">Reference product history (analogue)<select id="raHistory" data-hint="A recorded series kept under histories/, each listed with its metric, cadence and own peak so you can see the size of the stretch before you project. If this list is empty, enter or import values in Time Series Forecasting above and save them as a product history."></select></label>
+      <label><span id="raPeakLabel">Target peak</span><input id="raPeak" type="number" step="any" data-hint="The level the borrowed series is stretched to, in the reference series' own unit shown in this label. Every recorded period is multiplied by the same factor, so the reference's own highest reading becomes this number. Greater than zero."></label>
+      <label><span id="raAheadLabel">Forecast horizon (periods)</span><input id="raAhead" type="number" min="1" max="60" value="4" data-hint="How many future periods to project, counted after the last period of the borrowed series. Required: a blank horizon is refused rather than guessed."></label>
+    </div>
+    <p class="field-note" id="raNote"></p>
+    <button id="raRunBtn" class="primary" type="button" data-hint="Multiplies every recorded period of the selected series by one factor so its own peak becomes the target peak you entered, fits a straight line through the rescaled shape and projects it for the horizon above. Reads the stored series; it does not overwrite it and no provider is called.">Generate Analogue-Based Forecast</button>
+    <p class="field-note">To let the model rank the stored series against a written product profile instead of choosing by eye, use step 1 of a simulation — that suggestion path costs a provider call and this panel never does.</p>
+    <pre id="raErrors" class="errors"></pre>
+    <div id="raResult" class="muted">Pick a stored series, enter a target peak and a horizon, then choose Generate Analogue-Based Forecast.</div>
+  </section>
+
+  <section class="card" id="forecasterDriver">
+    <h2>Driver-Based Forecasting</h2>
+    <p>Project outcomes using external driver trajectories, baseline variables, and declared driver-to-variable effects. List several external drivers, give each an index trajectory and one pathway onto a named model variable, and give each affected variable its baseline value and growth rate. Read where the combined drift and pathways take every variable across the forecast horizon. No simulation is run, and it uses the same index continuation, level scaling and transition semantics the Exogenous driver projection model applies past a run's horizon.</p>
+    <p class="assumption-note">Inside a run a pathway fires only in the periods its trajectory covers and agents keep reacting to the result. Here every pathway fires in every projected period at that period's projected index, and nothing endogenous responds. What is projected is the external environment plus the growth rates you declare.</p>
+    <h3>Inputs</h3>
+    <div class="grid">
+      <label><span id="dtAheadLabel">Forecast horizon (periods)</span><input id="dtAhead" type="number" min="1" max="60" value="4" data-hint="How many periods past T&#8320; to carry the drivers and apply their pathways. Required: a blank horizon is refused rather than guessed. Past the last index reading the trajectory is arithmetic, not evidence."></label>
+      <label>Import driver index series<input id="dtFile" type="file" accept=".csv,.txt,.xlsx,.xlsm" data-hint="Adds one external driver per numeric column: the column header becomes the driver name and its values become the observed driver-index values. The file is sent to this local server for parsing only and nothing is written to disk."></label>
+    </div>
+    <p class="field-note" id="dtImportNote">Index readings can also be typed row by row, one driver per row.</p>
+    <h4>External drivers</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-hint="Names the driver in the register, the period table and the contribution columns. Two drivers cannot share a name.">External driver</th>
+          <th data-hint="How the index is carried into the horizon. Observed index values continue a least-squares straight line fitted through that driver's own readings; Compound growth grows an index anchored at T&#8320; geometrically at the rate you enter. Cells that the chosen basis does not use are greyed out.">Index basis</th>
+          <th data-hint="Used on the Observed index basis only. The driver's index level in each recorded period, oldest first, separated by commas or spaces. An index of 1 means the pathway fires exactly as configured; 2 means twice as hard.">Observed driver-index values (oldest to newest)</th>
+          <th data-hint="Used on the Compound growth basis only. The index level at T&#8320;, the period the forecast starts from; geometric growth is applied from this anchor.">Driver index at forecast start (T&#8320;)</th>
+          <th data-hint="Used on the Compound growth basis only. Typed as a percentage (0-100), not a fraction: 8 means +8% per period, so the index at period k is the anchor multiplied by 1.08 to the power k. Must be above -100%.">Driver growth per period (%)</th>
+          <th data-hint="The model variable this pathway moves. It must appear in the affected-variable register below, which is where its baseline value is held.">Affected model variable</th>
+          <th data-hint="The same five operations a configured pathway uses in a run, chosen from a list. set and divide are absolute and are not scaled by the index; add, subtract and multiply are.">Effect operation</th>
+          <th data-hint="The pathway value at index 1.0, before the projected index scales it, in the affected variable's own unit. add/subtract and multiply are scaled by the index; set/divide are used as typed.">Effect magnitude</th>
+          <th data-hint="Optional floor: the lowest value this pathway may leave the variable at, exactly as DriverPathway.minimum works in a run. Typed in the affected variable's own unit. Periods where it binds are reported.">Minimum allowed value</th>
+          <th data-hint="Optional ceiling: the highest value this pathway may take the variable to, exactly as DriverPathway.maximum works in a run. Typed in the affected variable's own unit. Periods where it binds are reported.">Maximum allowed value</th>
+          <th data-hint="How this pathway's number is justified, recorded and displayed with the result: empirical, user assumption, model hypothesis or synthetic illustrative. Nothing here is promoted to a measurement.">Evidence quality/grade</th>
+          <th data-hint="Marks the pathway as a qualitative hypothesis, not an evidence-backed effect: its index is still projected, but it applies no numeric effect — the same rule DriverPathway.qualitative_only follows in a run.">Hypothesis only (not evidence-backed)</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="dtDrivers"></tbody>
+      </table>
+    </div>
+    <button id="dtAddDriver" class="subtle" type="button" data-hint="Adds an external driver row. Drivers fire in listed order in every projected period, the order DriverProjectionForecast uses past a run's horizon, so two pathways on one variable stack deterministically.">Add driver</button>
+    <h4>Affected variables</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-hint="The quantity a pathway moves. Every driver's target must be named here; a variable is kept only if a driver targets it or it carries growth of its own.">Model variable</th>
+          <th data-hint="Required. The value this variable holds at T&#8320;, the period the forecast starts from, in its own unit. In a run this comes from the simulated world state; here you type it. A blank baseline is refused, never read as zero.">Baseline value at forecast start (T&#8320;)</th>
+          <th data-hint="Optional. What one unit of the baseline means, e.g. “treated patients per quarter” or “market share as a fraction (0-1)”. Nothing is converted between units: this text only says what the numbers beside it are, and every result column repeats it.">Unit of this variable (optional)</th>
+          <th data-hint="The variable's own organic growth per period, applied before any driver effect lands. Typed as a percentage (0-100), not a fraction: 6 is +6% each period, -3 is -3%. Must be above -100%. Blank means no organic drift.">Variable growth per period (%)</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="dtVariables"></tbody>
+      </table>
+    </div>
+    <div class="grid">
+      <button id="dtAddVariable" class="subtle" type="button" data-hint="Adds a variable with its baseline value at T&#8320; and its own growth rate per period.">Add variable</button>
+      <label>Import variables from a file<input id="dtVarFile" type="file" accept=".csv,.txt,.xlsx,.xlsm" data-hint="Reads a register with one variable per row: a text column of variable names, then a baseline value column, then an optional growth rate column (percentages or decimals per period — which one was applied is reported). The file is sent to this local server for parsing only and nothing is written to disk."></label>
+    </div>
+    <datalist id="dtVariableNames"></datalist>
+    <button id="dtRunBtn" class="primary" type="button" data-hint="Projects every driver index across the horizon, then applies each variable&rsquo;s own growth and every pathway in register order for each period. Refused before any arithmetic if a baseline is blank, a driver targets a variable that is not registered, or two drivers share a name. Nothing is saved and no provider is called.">Generate Driver-Based Forecast</button>
+    <pre id="dtErrors" class="errors"></pre>
+    <div id="dtResult" class="muted">Add at least one external driver and the variable it moves, then choose Generate Driver-Based Forecast.</div>
+  </section>
 </div>
 
 <!-- ============ WORKSPACE VIEW ============ -->
@@ -40,11 +148,11 @@
   <section class="toolbar"><label>Saved simulations<select id="savedSelect"><option value="">Choose saved simulation…</option></select></label><label>Example templates<select id="templateSelect"><option value="">Choose an example…</option></select></label><button id="templateLoadBtn" class="subtle">Load example</button><span id="status" role="status">Ready</span></section>
   <div class="layout">
     <div class="builder">
-      <section class="card"><h2>1. Simulation</h2><div class="grid"><label>Name<input id="name" value="New Simulation"></label><label>Definition ID<input id="simId" value="new-simulation"></label><label class="wide">Description<textarea id="description" rows="2"></textarea></label><label>Time horizon<input id="horizon" type="number" min="1" value="4"></label><label>Time step<input id="step" type="number" min="1" step="1" value="1"></label><label>Time unit<input id="stepUnit" value="round"></label><label>Decision policy<select id="decisionPolicy"><option value="rule_based">Rule-based</option><option value="llm">LLM fallback for ambiguous decisions</option></select><small class="field-note">The objective scorer selects decisive choices. The LLM is called only when scores are tied or unavailable.</small></label><label>Provider call cap<input id="llmMaxCalls" type="number" min="0" placeholder="unlimited"></label><label>Provider token budget<input id="llmMaxTokens" type="number" min="0" placeholder="unlimited"><small class="field-note">Both limits apply only to the LLM policy and span every branch of one run. When a limit is reached the remaining decisions are made by the configured rule-based policy, and the run reports that no model chose them. A model selecting an action is never evidence that the action is correct.</small></label><label>Forecast model<select id="forecast"><option value="state_metrics">State metrics</option><option value="launch_revenue">Launch revenue</option></select></label><label>Scenario policy<select id="policy"><option value="diversity">Diversity</option><option value="limited">Limited</option><option value="exhaustive">Exhaustive</option></select></label><label>Scenario limit<input id="limit" type="number" min="1" value="9"></label><label>Total node safety limit<input id="safety" type="number" min="1" value="1000"></label></div></section>
-      <section class="card"><h2>2. World</h2><p>Variables are stored as JSON values. Bounds, descriptions, and evidence grades are editor metadata.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Min</th><th>Max</th><th>Description</th><th></th></tr></thead><tbody id="variables"></tbody></table></div><button id="addVariable" class="subtle">Add variable</button></section>
-      <section class="card"><h2>3. Agents</h2><p>Edit stakeholder names, objectives, observations, and available actions with forms. You only need the advanced JSON editor for custom agent settings.</p><div id="agentsEditor" class="agent-editor"></div><button id="addAgent" class="subtle" type="button">Add agent</button><details class="advanced"><summary>Advanced agent settings (JSON)</summary><textarea id="agents" class="json" spellcheck="false"></textarea></details></section>
-      <section class="card"><h2>4. Actions</h2><p>Actions define the choices agents can make and which state variables they affect. The loaded example is ready to run without editing these settings.</p><details class="advanced"><summary>Advanced action definitions (JSON)</summary><textarea id="actions" class="json" spellcheck="false"></textarea></details></section>
-      <section class="card"><h2>5. Triggers</h2><p>Triggers determine when each agent gets to make a decision. The example already has these configured.</p><details class="advanced"><summary>Advanced trigger definitions (JSON)</summary><textarea id="triggers" class="json" spellcheck="false"></textarea></details></section>
+      <section class="card"><h2>1. Simulation</h2><div class="grid"><label>Name<input id="name" value="New Simulation"></label><label>Definition ID<input id="simId" value="new-simulation"></label><label class="wide">Description<textarea id="description" rows="2"></textarea></label><label>Time horizon<input id="horizon" type="number" min="1" value="4"></label><label>Time step<input id="step" type="number" min="1" step="1" value="1"></label><label>Time unit<input id="stepUnit" value="round"></label><label>Decision policy<select id="decisionPolicy"><option value="rule_based">Rule-based</option><option value="llm">LLM fallback for ambiguous decisions</option></select></label><p class="field-note wide">The objective scorer selects decisive choices. The LLM is called only when scores are tied or unavailable.</p><label class="llm-only">Provider call cap<input id="llmMaxCalls" type="number" min="0" placeholder="unlimited"></label><label class="llm-only">Provider token budget<input id="llmMaxTokens" type="number" min="0" placeholder="unlimited"></label><p class="field-note wide llm-only">Both limits apply only to the LLM policy and span every branch of one run. When a limit is reached the remaining decisions are made by the configured rule-based policy, and the run reports that no model chose them. A model selecting an action is never evidence that the action is correct.</p><label>Forecast model<select id="forecast" data-hint="Lists the forecast plugins the backend has registered, grouped by the kind of evidence each one uses. Hover an option to see what it needs before you can run it."></select></label><p class="field-note wide" id="forecastNote"></p><label class="wide history-only">Stored product history<select id="historySelect" data-hint="A recorded series kept under histories/. The historical forecast fits that series and projects it forward instead of reading the simulated path."></select></label><label class="history-only">Compare with variable<select id="historyVariable" data-hint="Optional world variable to measure the recorded trend against, so the run and the history can be compared. The series keeps its own name if you leave this empty."></select></label><p class="field-note wide history-only" id="historyNote"></p><label class="wide reference-only">Product profile for reference suggestion<textarea id="refProfile" rows="3" placeholder="What this product is, who prescribes or buys it, how it launches, at what price…" data-hint="Your own description of the new product. The model reads it together with the stored series list and ranks which recorded product is the closest analogue. Nothing is applied until you pick one."></textarea></label><button id="refSuggestBtn" class="subtle reference-only" type="button" data-hint="One provider call that ranks the stored product histories against the profile above. It needs a configured LLM provider and at least one stored history, and it changes nothing by itself.">Ask the model to rank stored histories</button><div id="refSuggestBox" class="reference-only"></div><label class="wide reference-only">Reference product history<select id="refHistorySelect" data-hint="A DIFFERENT product's recorded series. Its own ramp shape is rescaled so that its maximum lands on the peak you enter next; the shape is the borrowed part, the peak is yours."></select></label><label class="reference-only">Peak value for this product<input id="refPeak" type="number" step="any" data-hint="The level the reference series is stretched to. The reference's own highest recorded value becomes this number, and every other period is multiplied by the same factor."></label><p class="field-note wide reference-only" id="refNote"></p><label>Scenario policy<select id="policy"><option value="diversity">Diversity</option><option value="limited">Limited</option><option value="exhaustive">Exhaustive</option></select></label><label class="policy-counted">Scenario limit<input id="limit" type="number" min="1" value="9"></label><label class="policy-exhaustive">Total node safety limit<input id="safety" type="number" min="1" value="1000"></label><p class="field-note wide" id="policyNote"></p></div></section>
+      <section class="card"><h2>2. World</h2><p>Variables are stored as JSON values. Descriptions and evidence grades travel with the definition as documentation.</p><div class="table-wrap"><table><thead><tr><th data-hint="The exact name actions, triggers, objectives and driver pathways must use to refer to this variable.">Name</th><th data-hint="How the value is stored in world state. It is picked from what you type; override it only if the text guess is wrong.">Type</th><th data-hint="The value this variable starts with at time 0.">Value</th><th data-hint="Documentation shown in the results evidence panel; the engine never reads it.">Description</th><th></th></tr></thead><tbody id="variables"></tbody></table></div><button id="addVariable" class="subtle">Add variable</button></section>
+      <section class="card"><h2>3. Agents</h2><p>Edit stakeholder names, objectives, decision timing, actions, and observations with forms. You only need the advanced JSON editor for custom agent settings.</p><div id="agentsEditor" class="agent-editor"></div><button id="addAgent" class="subtle" type="button">Add agent</button><details class="advanced"><summary>Advanced agent settings (JSON)</summary><textarea id="agents" class="json" spellcheck="false"></textarea></details></section>
+      <section class="card"><h2>4. Actions</h2><p>Actions define the choices agents can make and which state variables they affect. Add simple actions from each agent card in step 3; constraints and generated events stay editable in the JSON below.</p><div id="actionSummary" class="def-list"></div><details class="advanced"><summary>Advanced action definitions (JSON)</summary><textarea id="actions" class="json" spellcheck="false"></textarea></details></section>
+      <section class="card"><h2>5. Triggers</h2><p>Triggers determine when each agent gets to make a decision. Set them per agent in step 3 (“Once at start” or “Every round”); state-condition triggers stay in the JSON below.</p><div id="triggerSummary" class="def-list"></div><details class="advanced"><summary>Advanced trigger definitions (JSON)</summary><textarea id="triggers" class="json" spellcheck="false"></textarea></details></section>
       <section class="card"><h2>6. External environment</h2>
         <p>Drivers are outside forces — technology, regulation, pricing pressure — that change the world on a schedule. They are compiled into ordinary scheduled events and transition rules, so the same deterministic engine applies them.</p>
         <p class="assumption-note">Driver strengths below are configured assumptions, not measurements. Variants let you compare worlds; they do not make any variant more true.</p>
@@ -52,25 +160,52 @@
         <details class="advanced"><summary>Advanced driver definitions (JSON)</summary><textarea id="drivers" class="json" spellcheck="false"></textarea></details>
       </section>
       <section class="card"><h2>7. Transitions &amp; Settings</h2><p>Advanced configuration for how events change the world and when they occur.</p><details class="advanced"><summary>Transition rules (JSON)</summary><textarea id="transitions" class="json short" spellcheck="false"></textarea></details><details class="advanced"><summary>Initial events (JSON)</summary><textarea id="initialEvents" class="json short" spellcheck="false"></textarea></details><details class="advanced"><summary>Scheduled events (JSON)</summary><textarea id="scheduledEvents" class="json short" spellcheck="false"></textarea></details></section>
-      <section class="card run-card"><h2>8. Run</h2><button id="validateBtn" class="subtle">Validate definition</button><button id="runBtn" class="primary">Run simulation</button><div id="progress" class="progress" hidden><div class="progress-bar"><span id="progressBar"></span></div><p id="progressText" class="muted"></p></div><pre id="errors" class="errors"></pre></section>
+      <section class="card run-card"><h2>8. Run</h2>
+        <label class="check-option gap-fill-option"><input type="checkbox" id="llmFillGaps"><span>Let the model supply labeled assumptions for values I left blank</span></label>
+        <small class="field-note">Uses one provider call before the run. The model may only fill gaps it detects — a world value stored as text instead of a number, an agent with no actions, or an agent with no decision timing — and never changes anything you entered. Added items are labeled as model assumptions, listed below, and stay editable.</small>
+        <div id="gapReport" hidden></div>
+        <button id="validateBtn" class="subtle">Validate definition</button><button id="runBtn" class="primary">Run simulation</button><div id="progress" class="progress" hidden><div class="progress-bar"><span id="progressBar"></span></div><p id="progressText" class="muted"></p></div><pre id="errors" class="errors"></pre></section>
     </div>
     <div class="results">
+      <nav class="tabs" role="tablist" aria-label="Result panels">
+        <button class="tab is-active" type="button" role="tab" aria-selected="true" data-tab="overview">Overview</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="decisions">Decisions</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="outcomes">Outcomes</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="environment">Environment</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="audit">Audit &amp; trace</button>
+      </nav>
+      <div class="tabpanel is-active" id="panel-overview" role="tabpanel">
       <section class="card"><h2>Simulation summary</h2><div id="summary" class="summary muted">Run a simulation to view results.</div></section>
       <section class="card"><h2>Assumptions &amp; evidence</h2><p>What is measured, what you assumed, and what is synthetic. Values are never silently promoted to facts.</p><div id="assumptions" class="muted">Run a simulation to see the evidence grading behind these results.</div></section>
+      </div>
+      <div class="tabpanel" id="panel-decisions" role="tabpanel" hidden>
       <section class="card"><h2>Decision flowchart</h2><p>Generated from the recorded trace of this run — not a generic diagram. Counterfactual branches are shown dimmed; pruned branches are marked with the policy that removed them.</p><div id="flowchart" class="flow-wrap muted">The flowchart appears here after a run.</div></section>
+      <section class="card"><h2>Scenario detail</h2><div id="scenarioDetail" class="muted">Select a terminal scenario in the flowchart, tree, or comparison table.</div></section>
+      </div>
+      <div class="tabpanel" id="panel-outcomes" role="tabpanel" hidden>
       <section class="card"><h2>Scenario comparison</h2><div class="table-wrap"><table id="comparison"><thead></thead><tbody></tbody></table></div></section>
       <section class="card"><h2>Outcome charts</h2><p>Compare modeled outcomes across retained scenarios. Values come from the selected forecast model.</p><div id="charts" class="charts muted">Run a simulation to compare outcomes visually.</div></section>
       <section class="card"><h2>Variable time series</h2><p>World state recorded at each time step for every retained scenario.</p><div id="timeseries" class="charts muted">Run a simulation to plot state trajectories.</div></section>
+      </div>
+      <div class="tabpanel" id="panel-environment" role="tabpanel" hidden>
       <section class="card"><h2>External driver effects</h2><p>Every configured pathway that fired, with its lag, strength, and evidence grade.</p><div id="driverEffects" class="muted">This run has no external drivers, or none were active.</div></section>
       <section class="card"><h2>Driver variant comparison</h2><p>Re-runs the current definition once per variant of one driver, without saving. Same agents, same rules — only the driver trajectory changes.</p><div id="variantComparison" class="muted">Use “Compare all variants” on a driver card to fill this panel.</div></section>
+      </div>
+      <div class="tabpanel" id="panel-audit" role="tabpanel" hidden>
       <section class="card"><h2>Decision audit</h2><p>Which layer chose each action: the objective scorer, a rule-based fallback, or an LLM. A fallback choice is a configured preference, not evidence of correctness.</p><div id="decisionAuditSummary" class="legend"></div><div class="table-wrap"><table id="decisionAudit"><thead></thead><tbody></tbody></table></div><div id="decisionAuditEmpty" class="muted">Run a simulation to audit decisions.</div></section>
       <section class="card"><h2>Scenario tree</h2><details class="advanced"><summary>Full node tree (text)</summary><div id="tree" class="tree muted">The tree will appear here after a run.</div></details></section>
-      <section class="card"><h2>Scenario detail</h2><div id="scenarioDetail" class="muted">Select a terminal scenario in the flowchart, tree, or comparison table.</div></section>
+      </div>
     </div>
   </div>
 </div>
 </main>
-<script src="/static/app.js"></script>
-<script src="/static/guided.js"></script>
-<script src="/static/dashboard.js"></script>
+<footer class="disclaimer"><div class="wrap">
+  <span>Deterministic architecture demonstrator and evaluation harness — not a production or decision-support system.</span>
+  <span>All bundled examples use synthetic, uncalibrated values. Sales, share, and scores are modeled outputs, never forecasts.</span>
+</div></footer>
+<script src="/static/hints.js?v=8"></script>
+<script src="/static/app.js?v=17"></script>
+<script src="/static/guided.js?v=7"></script>
+<script src="/static/dashboard.js?v=18"></script>
+<script src="/static/forecaster.js?v=25"></script>
 </body></html>

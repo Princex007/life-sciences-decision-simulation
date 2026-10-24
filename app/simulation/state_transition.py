@@ -58,7 +58,7 @@ class StateTransitionSystem:
         """Apply one configured action exactly once and emit its configured events."""
         previous = state.model_copy(deep=True)
         for effect in action.effects:
-            self._apply_effect(state, effect, action.parameters)
+            self.apply_effect(state, effect, action.parameters)
         events = [SimulationEvent(event_id=f"evt:{time}:{action.id}:{index}", time=time,
                     event_type=item["event_type"], description=item.get("description", action.description),
                     actor_id=action.agent_id, priority=int(item.get("priority", 0)), data=item.get("data", {}))
@@ -73,13 +73,18 @@ class StateTransitionSystem:
             rule_events = [item.strip() for item in rule.event_type.split(",")]
             if event.event_type in rule_events or "*" in rule_events:
                 for effect in rule.effects:
-                    self._apply_effect(state, effect, {})
+                    self.apply_effect(state, effect, {})
         return TransitionResult(previous, state, [])
 
     @staticmethod
-    def _apply_effect(state: WorldState, effect: ActionEffect, parameters: dict[str, Any]) -> None:
-        """Apply a generic set/add/multiply/subtract/divide operation."""
-        value = evaluate_value(effect.value, state, parameters)
+    def apply_effect(state: WorldState, effect: ActionEffect,
+                     parameters: dict[str, Any] | None = None) -> None:
+        """Apply a generic set/add/multiply/subtract/divide operation.
+
+        Public because the driver forecast applies the identical semantics to periods
+        beyond the simulated horizon, where there is no event to route the effect through.
+        """
+        value = evaluate_value(effect.value, state, parameters or {})
         current = state.get(effect.variable, 0)
         operations = {"set": lambda: value, "add": lambda: current + value,
                       "subtract": lambda: current - value, "multiply": lambda: current * value,

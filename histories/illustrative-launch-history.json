@@ -1,0 +1,12 @@
+{
+  "history_id": "illustrative-launch-history",
+  "name": "Illustrative treated-patient history",
+  "description": "Eight illustrative quarterly readings used to show historical forecasting without pasting numbers. Not real product data.",
+  "values": [120, 132, 141, 158, 171, 182, 196, 208],
+  "variable": "patients_treated",
+  "unit": "treated patients in the quarter",
+  "cadence": "quarter",
+  "source": "Bundled illustrative fixture",
+  "evidence_grade": "synthetic_illustrative",
+  "assumption_label": "Illustrative series shipped with the app. Replace it with your own recorded quarters."
+}

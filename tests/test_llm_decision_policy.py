@@ -1,5 +1,8 @@
 import pytest
 import json
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 from app.agents.llm import (DecisionPrompt, DecisionPromptBuilder, LLMConfigurationError,
                             LLMDecisionPolicy, MockLLMClient, LLMCompletion,
@@ -288,7 +291,7 @@ def test_infeasible_local_action_is_filtered_before_model_selection():
 
 
 def test_three_agent_smoke_is_sequential_filtered_and_single_scenario():
-    definition = Definition.from_json("examples/local_multi_agent_smoke.json")
+    definition = Definition.from_json(str(PROJECT_ROOT / "tests" / "fixtures" / "local_multi_agent_smoke.json"))
 
     def choose_first(context, _prompt):
         return {"primary_action": context.available_actions[0].id,

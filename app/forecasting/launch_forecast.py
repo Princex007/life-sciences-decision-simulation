@@ -4,7 +4,8 @@ from app.domain.world import WorldState
 
 class LaunchForecast:
     """Compute patient-times-net-price launch metrics from named variables."""
-    def forecast(self, final_state: WorldState, snapshots: list[WorldState], scenario) -> Outcome:
+    def forecast(self, final_state: WorldState, snapshots: list[WorldState], scenario,
+                 context=None) -> Outcome:
         states = snapshots or [final_state]
         revenues, treated_values = [], []
         for state in states:

@@ -69,7 +69,8 @@ class ScenarioGenerator:
                          f"'{trigger.definition.id}' but was not the decision layer's selection.")
             target_strategy = definition.strategy if definition.strategy is not None else definition.id
             already_applied = (memory.current_strategy == target_strategy and memory.previous_actions
-                               and memory.previous_actions[-1] == definition.id)
+                               and memory.previous_actions[-1] == definition.id
+                               and memory.last_decision_time == time)
             if already_applied:
                 result = TransitionResult(before, child.world.model_copy(deep=True), [])
             else:

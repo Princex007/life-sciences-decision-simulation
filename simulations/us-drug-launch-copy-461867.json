@@ -1,0 +1,1340 @@
+{
+  "metadata": {
+    "id": "us-drug-launch-copy-461867",
+    "name": "Drug X vs rival share ramp",
+    "description": "Hypothetical eight-quarter US pharmaceutical launch",
+    "domain": "life_sciences"
+  },
+  "initial_world_state": {
+    "time": 0,
+    "variables": {
+      "drug_price": 100000,
+      "company_reference_price_assumption": 100000,
+      "company_discounted_price_assumption": 60000,
+      "competitor_price": 90000,
+      "market_share": 0,
+      "competitor_market_share": 0.35,
+      "payer_access": 0.75,
+      "physician_adoption": 0.05,
+      "patient_adoption": 0.04,
+      "patient_adherence_rate": 0.6,
+      "diagnosis_rate": 0.65,
+      "treatment_rate": 0.7,
+      "company_launch_status": "pre_launch",
+      "competitor_launch_status": "launched",
+      "company_promotion": 1,
+      "competitor_promotion": 1,
+      "competitor_internal_strategy": "undecided",
+      "competitor_unit_cost_assumption": 60000,
+      "competitor_promotion_spend": 0,
+      "competitor_promotion_spend_per_increase_assumption": 250000,
+      "competitor_promotion_budget_assumption": 1000000,
+      "efficacy_advantage": 0.15,
+      "addressable_patients": 1000000
+    }
+  },
+  "world_variable_metadata": {
+    "drug_price": {
+      "type": "number"
+    },
+    "company_reference_price_assumption": {
+      "label": "Experimental illustrative launch-price assumption; not an empirical market estimate",
+      "unit": "scenario currency per treatment unit",
+      "type": "number"
+    },
+    "company_discounted_price_assumption": {
+      "label": "Experimental illustrative discounted launch-price assumption; not an empirical market estimate",
+      "unit": "scenario currency per treatment unit",
+      "type": "number"
+    },
+    "competitor_price": {
+      "type": "number"
+    },
+    "market_share": {
+      "type": "number"
+    },
+    "competitor_market_share": {
+      "type": "number"
+    },
+    "payer_access": {
+      "type": "number"
+    },
+    "physician_adoption": {
+      "type": "number"
+    },
+    "patient_adoption": {
+      "type": "number"
+    },
+    "patient_adherence_rate": {
+      "label": "Synthetic illustrative and uncalibrated patient adherence scenario assumption; not observed patient behavior",
+      "unit": "fraction from 0 to 1",
+      "type": "number"
+    },
+    "diagnosis_rate": {
+      "type": "number"
+    },
+    "treatment_rate": {
+      "type": "number"
+    },
+    "company_launch_status": {
+      "type": "string"
+    },
+    "competitor_launch_status": {
+      "type": "string"
+    },
+    "company_promotion": {
+      "type": "number"
+    },
+    "competitor_promotion": {
+      "type": "number"
+    },
+    "competitor_internal_strategy": {
+      "type": "string"
+    },
+    "competitor_unit_cost_assumption": {
+      "label": "Illustrative assumption; not empirical pharmaceutical data",
+      "unit": "scenario currency per treatment unit",
+      "type": "number"
+    },
+    "competitor_promotion_spend": {
+      "label": "Illustrative cumulative promotion expenditure",
+      "unit": "scenario currency",
+      "type": "number"
+    },
+    "competitor_promotion_spend_per_increase_assumption": {
+      "label": "Illustrative assumption; not empirical pharmaceutical data",
+      "unit": "scenario currency per promotion increase",
+      "type": "number"
+    },
+    "competitor_promotion_budget_assumption": {
+      "label": "Illustrative assumption; not empirical pharmaceutical data",
+      "unit": "scenario currency cumulative budget",
+      "type": "number"
+    },
+    "efficacy_advantage": {
+      "type": "number"
+    },
+    "addressable_patients": {
+      "type": "number"
+    }
+  },
+  "evaluation_objectives": {
+    "company": {
+      "label": "Illustrative experimental evaluation score based on the configured one-step launch forecast; not calibrated evidence or a profit estimate.",
+      "normalization_assumption": "The cumulative-sales preview is normalized to an illustrative 0 to 2,000,000,000 scenario-currency scale; this is not an empirical market bound.",
+      "limitations": "Uses only the configured forecast's cumulative_sales metric over the current and one-step-ahead preview states; does not model costs, profit, lifetime sales, or competitor/market reactions beyond the preview.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "components": [
+        {
+          "name": "one_step_cumulative_sales",
+          "source": "forecast_metrics",
+          "metric": "cumulative_sales",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 2000000000,
+            "basis": "illustrative scenario-scale ceiling for the two-snapshot preview"
+          },
+          "preference": "maximize",
+          "weight": 1
+        }
+      ]
+    },
+    "payer": {
+      "label": "Illustrative experimental evaluation score balancing configured payer access and modeled LaunchForecast expenditure proxy; not calibrated evidence or actual net payer spending.",
+      "normalization_assumption": "payer_access uses its configured 0 to 1 bounds. LaunchForecast cumulative_sales uses an illustrative 0 to 2,000,000,000 scenario-currency range for the two-snapshot preview.",
+      "limitations": "cumulative_sales is a modeled sales/expenditure proxy based on treated patients and the configured net_price or drug_price times 0.85 fallback. It is not actual payer net expenditure and does not model rebates, negotiated prices, treatment costs, or a payer budget.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "components": [
+        {
+          "name": "payer_access",
+          "source": "projected_state",
+          "metric": "payer_access",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 1,
+            "basis": "configured payer_access bounds"
+          },
+          "preference": "maximize",
+          "weight": 0.5
+        },
+        {
+          "name": "modeled_drug_expenditure_proxy",
+          "source": "forecast_metrics",
+          "metric": "cumulative_sales",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 2000000000,
+            "basis": "illustrative scenario-scale ceiling for the two-snapshot forecast preview"
+          },
+          "preference": "minimize",
+          "weight": 0.5
+        }
+      ]
+    },
+    "physician": {
+      "label": "Synthetic, illustrative, uncalibrated aggregate benefit-risk preference score; not a validated measure of clinical appropriateness or treatment quality.",
+      "normalization_assumption": "Expected responders and expected adverse events are each normalized against an illustrative 0 to 1,000,000 aggregate-count scale based on this scenario's one-million addressable-patient input. Weights express experimental preferences between normalized dimensions and do not assert clinical equivalence between an individual responder and an individual adverse event.",
+      "limitations": "Uses only expected_responders and expected_adverse_events from configured rates multiplied by LaunchForecast patients_treated over the two-snapshot preview horizon. Both counts scale with treatment volume and may overlap; no response magnitude, adverse-event severity, mortality, quality of life, treatment burden, or cost-effectiveness is modeled.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "components": [
+        {
+          "name": "expected_responders",
+          "source": "clinical_outcomes",
+          "metric": "expected_responders",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 1000000,
+            "basis": "illustrative aggregate-count scale matching the configured addressable-patient scenario input"
+          },
+          "preference": "maximize",
+          "weight": 0.5
+        },
+        {
+          "name": "expected_adverse_events",
+          "source": "clinical_outcomes",
+          "metric": "expected_adverse_events",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 1000000,
+            "basis": "illustrative aggregate-count scale matching the configured addressable-patient scenario input"
+          },
+          "preference": "minimize",
+          "weight": 0.5
+        }
+      ]
+    },
+    "patient": {
+      "label": "Synthetic, experimental, illustrative, and uncalibrated aggregate patient preference score; not a validated measure of individual welfare or clinical appropriateness.",
+      "normalization_assumption": "Expected responders and expected adverse events use an illustrative 0 to 1,000,000 aggregate-count scale. Estimated patient cost uses an illustrative 0 to 100,000 scenario-currency-per-treatment-unit scale, matching the configured reference drug price. Weights combine normalized dimensions and do not establish clinical equivalence or real-world affordability.",
+      "limitations": "Expected outcomes use the existing fixed configured rates and LaunchForecast treated-patient estimate; responders and adverse events can overlap and both scale with volume. Patient cost is projected drug_price times a synthetic cost-share fraction, not an actual copay, deductible, insured liability, or observed expense. No response magnitude, event severity, insurance benefits, treatment burden, quality of life, mortality, or cost-effectiveness is modeled.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "components": [
+        {
+          "name": "expected_responders",
+          "source": "clinical_outcomes",
+          "metric": "expected_responders",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 1000000,
+            "basis": "illustrative aggregate-count scale matching the configured addressable-patient scenario input"
+          },
+          "preference": "maximize",
+          "weight": 0.4
+        },
+        {
+          "name": "expected_adverse_events",
+          "source": "clinical_outcomes",
+          "metric": "expected_adverse_events",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 1000000,
+            "basis": "illustrative aggregate-count scale matching the configured addressable-patient scenario input"
+          },
+          "preference": "minimize",
+          "weight": 0.3
+        },
+        {
+          "name": "estimated_patient_cost",
+          "source": "patient_affordability",
+          "metric": "estimated_patient_cost",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0,
+            "maximum": 100000,
+            "basis": "illustrative scenario-currency-per-treatment-unit scale matching the configured reference drug price"
+          },
+          "preference": "minimize",
+          "weight": 0.3
+        }
+      ]
+    },
+    "competitor": {
+      "label": "Illustrative evaluation-only score; preferences and weights are assumptions, not calibrated evidence.",
+      "score_tie_tolerance": 0.005,
+      "score_tie_tolerance_label": "Experimental, illustrative, and uncalibrated score-margin tolerance.",
+      "score_range": [
+        0,
+        1
+      ],
+      "limitations": "Not a total-profit estimate; competitor unit volume is not modeled.",
+      "components": [
+        {
+          "name": "competitor_market_share",
+          "source": "after_next_time_step",
+          "metric": "competitor_market_share",
+          "normalization": {
+            "method": "min_max",
+            "minimum": 0.05,
+            "maximum": 0.8,
+            "basis": "configured market-share transition bounds"
+          },
+          "preference": "maximize",
+          "weight": 0.4
+        },
+        {
+          "name": "unit_contribution_rate",
+          "source": "configured_derived_metrics",
+          "metric": "competitor_unit_contribution_after_action",
+          "normalization": {
+            "method": "ratio_to_projected_variable",
+            "denominator_variable": "competitor_price",
+            "minimum": 0,
+            "maximum": 1,
+            "basis": "unit contribution divided by projected price"
+          },
+          "preference": "maximize",
+          "weight": 0.4
+        },
+        {
+          "name": "promotion_budget_used",
+          "source": "projected_state",
+          "metric": "competitor_promotion_spend",
+          "normalization": {
+            "method": "ratio_to_projected_variable",
+            "denominator_variable": "competitor_promotion_budget_assumption",
+            "minimum": 0,
+            "maximum": 1,
+            "basis": "projected cumulative spend divided by configured budget"
+          },
+          "preference": "minimize",
+          "weight": 0.2
+        }
+      ]
+    }
+  },
+  "clinical_outcome_assumptions": {
+    "label": "Synthetic, illustrative, and uncalibrated scenario assumptions; not empirical estimates for any real drug or disease.",
+    "treatment_response_rate": 0.6,
+    "adverse_event_rate": 0.1,
+    "forecast_horizon": "Maximum modeled patients_treated across the current and next configured time_step snapshots (two-snapshot preview)."
+  },
+  "patient_affordability_assumptions": {
+    "label": "Synthetic, illustrative, and uncalibrated cost-sharing proxy; not an actual insurance arrangement or observed patient expense.",
+    "patient_cost_share_fraction": 0.2,
+    "unit": "scenario currency per treatment unit",
+    "limitation": "Projected drug_price multiplied by the configured fraction; excludes insurance benefits, deductibles, rebates, and other costs."
+  },
+  "evidence": [
+    {
+      "evidence_id": "EVID-COMP-PRICE",
+      "title": "Synthetic competitor historical pricing",
+      "content": "Synthetic fixture: a competitor tested a price reduction after a sustained share decline.",
+      "source": "SYNTHETIC / illustrative launch history",
+      "source_type": "synthetic_case_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "competitor",
+        "pricing",
+        "market_share"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "competitor"
+      ],
+      "related_variables": [
+        "competitor_market_share",
+        "competitor_price"
+      ],
+      "related_actions": [
+        "aggressive_price_cut"
+      ]
+    },
+    {
+      "evidence_id": "EVID-COMP-SHARE",
+      "title": "Synthetic competitor share response",
+      "content": "Synthetic fixture: promotion was maintained during a small share decline when price positioning was already aggressive.",
+      "source": "SYNTHETIC / illustrative launch history",
+      "source_type": "synthetic_case_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "competitor",
+        "market_share",
+        "promotion"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "competitor"
+      ],
+      "related_variables": [
+        "competitor_market_share",
+        "competitor_promotion"
+      ],
+      "related_actions": [
+        "increase_promotion",
+        "maintain_strategy"
+      ]
+    },
+    {
+      "evidence_id": "EVID-PAYER-ACCESS",
+      "title": "Synthetic payer access review",
+      "content": "Synthetic fixture: access review considers net cost, addressable population, and observed treatment access.",
+      "source": "SYNTHETIC / illustrative payer exercise",
+      "source_type": "synthetic_policy_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "payer",
+        "access",
+        "cost"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "payer"
+      ],
+      "related_variables": [
+        "payer_access",
+        "drug_price",
+        "addressable_patients"
+      ],
+      "related_actions": [
+        "restricted_access",
+        "standard_access",
+        "favorable_access"
+      ]
+    },
+    {
+      "evidence_id": "EVID-PHYS-ADOPTION",
+      "title": "Synthetic physician adoption pattern",
+      "content": "Synthetic fixture: physician uptake is considered alongside access and the configured efficacy advantage.",
+      "source": "SYNTHETIC / illustrative clinical exercise",
+      "source_type": "synthetic_case_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "physician",
+        "adoption",
+        "efficacy"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "physician"
+      ],
+      "related_variables": [
+        "physician_adoption",
+        "efficacy_advantage",
+        "payer_access"
+      ],
+      "related_actions": [
+        "slow_adoption",
+        "adopt",
+        "maintain_adoption"
+      ]
+    },
+    {
+      "evidence_id": "EVID-PAT-ADOPTION",
+      "title": "Synthetic patient adoption consideration",
+      "content": "Synthetic fixture: patient uptake is modeled as contingent on treatment access and physician adoption.",
+      "source": "SYNTHETIC / illustrative patient exercise",
+      "source_type": "synthetic_case_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "patient",
+        "adoption",
+        "access"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "patient"
+      ],
+      "related_variables": [
+        "patient_adoption",
+        "payer_access",
+        "physician_adoption"
+      ],
+      "related_actions": []
+    },
+    {
+      "evidence_id": "EVID-CLIN-EFFICACY",
+      "title": "Synthetic clinical efficacy summary",
+      "content": "Synthetic fixture: the scenario defines efficacy advantage as an input; this record makes no external clinical claim.",
+      "source": "SYNTHETIC / model input description",
+      "source_type": "synthetic_model_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "clinical",
+        "efficacy"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "company",
+        "physician"
+      ],
+      "related_variables": [
+        "efficacy_advantage"
+      ],
+      "related_actions": [
+        "launch",
+        "adopt"
+      ]
+    },
+    {
+      "evidence_id": "EVID-REG-CONSTRAINT",
+      "title": "Synthetic regulatory constraint note",
+      "content": "Synthetic fixture: this example does not model approval, label expansion, or promotional compliance decisions.",
+      "source": "SYNTHETIC / scenario scope note",
+      "source_type": "synthetic_scope_note",
+      "date": "2026-01-01",
+      "domain": "synthetic_life_sciences",
+      "tags": [
+        "regulatory",
+        "constraints",
+        "scope"
+      ],
+      "reliability_label": "illustrative",
+      "applicable_agents": [
+        "company"
+      ],
+      "related_variables": [],
+      "related_actions": [
+        "launch"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "id": "company",
+      "name": "Company",
+      "type": "company",
+      "objective": "maximize configured one-step cumulative sales forecast while supporting sustainable adoption",
+      "secondary_objectives": [
+        "support sustainable adoption"
+      ],
+      "constraints": {},
+      "resources": {
+        "promotion_budget": "configured in world state"
+      },
+      "observable_state": [
+        "drug_price",
+        "net_price",
+        "company_reference_price_assumption",
+        "company_discounted_price_assumption",
+        "market_share",
+        "competitor_market_share",
+        "payer_access",
+        "physician_adoption",
+        "company_launch_status",
+        "addressable_patients",
+        "diagnosis_rate",
+        "treatment_rate"
+      ],
+      "available_actions": [
+        "launch",
+        "launch_discounted"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "default_actions": [
+          "launch",
+          "launch_discounted"
+        ]
+      },
+      "memory_configuration": {},
+      "evidence_tags": [],
+      "initial_strategy": null
+    },
+    {
+      "id": "competitor",
+      "name": "Competitor",
+      "type": "competitor",
+      "objective": "protect market share while maintaining positive unit contribution and keeping cumulative promotion spend within the configured illustrative budget",
+      "secondary_objectives": [
+        "maintain competitive positioning",
+        "preserve unit economics"
+      ],
+      "constraints": {},
+      "resources": {},
+      "observable_state": [
+        "drug_price",
+        "competitor_price",
+        "market_share",
+        "competitor_market_share",
+        "company_promotion",
+        "competitor_promotion",
+        "competitor_internal_strategy",
+        "competitor_unit_cost_assumption",
+        "competitor_promotion_spend",
+        "competitor_promotion_spend_per_increase_assumption",
+        "competitor_promotion_budget_assumption"
+      ],
+      "available_actions": [
+        "aggressive_price_cut",
+        "increase_promotion",
+        "maintain_strategy"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "default_actions": [
+          "aggressive_price_cut",
+          "increase_promotion",
+          "maintain_strategy"
+        ]
+      },
+      "memory_configuration": {},
+      "evidence_tags": [],
+      "initial_strategy": null
+    },
+    {
+      "id": "payer",
+      "name": "Payer",
+      "type": "payer",
+      "objective": "balance patient access against the modeled LaunchForecast expenditure proxy under configured rules",
+      "secondary_objectives": [
+        "balance affordability and patient access"
+      ],
+      "constraints": {},
+      "resources": {},
+      "observable_state": [
+        "drug_price",
+        "net_price",
+        "competitor_price",
+        "payer_access",
+        "market_share",
+        "addressable_patients",
+        "diagnosis_rate",
+        "treatment_rate"
+      ],
+      "available_actions": [
+        "restricted_access",
+        "standard_access",
+        "favorable_access"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "payer_review",
+            "when": [
+              {
+                "variable": "payer_access",
+                "operator": "lte",
+                "value": 0.6
+              }
+            ],
+            "plausible_actions": [
+              "restricted_access"
+            ],
+            "reason": "Retain restricted access at a scheduled review unless another configured policy changes it."
+          },
+          {
+            "when_event": "payer_review",
+            "when": [
+              {
+                "variable": "payer_access",
+                "operator": "lt",
+                "value": 0.8
+              }
+            ],
+            "plausible_actions": [
+              "standard_access",
+              "favorable_access"
+            ],
+            "reason": "At scheduled review, preserve standard access or improve it; a review alone does not justify restriction."
+          },
+          {
+            "when_event": "payer_review",
+            "when": [
+              {
+                "variable": "payer_access",
+                "operator": "gte",
+                "value": 0.8
+              }
+            ],
+            "plausible_actions": [
+              "favorable_access",
+              "standard_access"
+            ],
+            "reason": "At scheduled review, retain favorable access or move to standard based on the explicit policy."
+          }
+        ],
+        "default_actions": [
+          "restricted_access",
+          "standard_access",
+          "favorable_access"
+        ]
+      },
+      "memory_configuration": {},
+      "evidence_tags": [],
+      "initial_strategy": null
+    },
+    {
+      "id": "physician",
+      "name": "Physician",
+      "type": "physician",
+      "objective": "treat patients appropriately under configured clinical and access context",
+      "secondary_objectives": [
+        "use accessible effective therapy"
+      ],
+      "constraints": {},
+      "resources": {},
+      "observable_state": [
+        "payer_access",
+        "physician_adoption",
+        "efficacy_advantage",
+        "drug_price"
+      ],
+      "available_actions": [
+        "slow_adoption",
+        "adopt",
+        "maintain_adoption"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when": [
+              {
+                "variable": "payer_access",
+                "operator": "lt",
+                "value": 0.65
+              }
+            ],
+            "plausible_actions": [
+              "slow_adoption"
+            ]
+          },
+          {
+            "when": [
+              {
+                "variable": "payer_access",
+                "operator": "gte",
+                "value": 0.65
+              }
+            ],
+            "plausible_actions": [
+              "adopt",
+              "maintain_adoption"
+            ]
+          }
+        ],
+        "default_actions": [
+          "adopt"
+        ]
+      },
+      "memory_configuration": {},
+      "evidence_tags": [],
+      "initial_strategy": null
+    },
+    {
+      "id": "patient",
+      "name": "Patient",
+      "type": "patient",
+      "objective": "experimental aggregate preference for expected response and access affordability under configured assumptions",
+      "secondary_objectives": [],
+      "constraints": {},
+      "resources": {},
+      "observable_state": [
+        "payer_access",
+        "physician_adoption",
+        "patient_adoption",
+        "patient_adherence_rate",
+        "drug_price"
+      ],
+      "available_actions": [
+        "high_adherence",
+        "moderate_adherence"
+      ],
+      "decision_policy": {
+        "type": "rule_based",
+        "rules": [
+          {
+            "when_event": "company_launch",
+            "plausible_actions": [
+              "high_adherence",
+              "moderate_adherence"
+            ],
+            "reason": "Synthetic illustrative patient adherence alternatives at product launch."
+          }
+        ],
+        "default_actions": [
+          "high_adherence",
+          "moderate_adherence"
+        ]
+      },
+      "memory_configuration": {},
+      "evidence_tags": [],
+      "initial_strategy": null
+    }
+  ],
+  "action_definitions": [
+    {
+      "id": "launch",
+      "name": "Launch at reference price",
+      "agent_id": "company",
+      "description": "Launch at the configured reference price assumption",
+      "strategy": "market_entry_reference_price",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "next_state": {
+          "drug_price": {
+            "min": 1
+          }
+        }
+      },
+      "effects": [
+        {
+          "variable": "drug_price",
+          "operation": "set",
+          "value": {
+            "variable": "company_reference_price_assumption"
+          },
+          "minimum": null,
+          "maximum": null
+        },
+        {
+          "variable": "company_launch_status",
+          "operation": "set",
+          "value": "launched",
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": [
+        {
+          "event_type": "company_launch",
+          "description": "Company launches product at the configured reference price"
+        }
+      ]
+    },
+    {
+      "id": "launch_discounted",
+      "name": "Launch at discounted price",
+      "agent_id": "company",
+      "description": "Launch at the configured experimental discounted-price assumption",
+      "strategy": "market_entry_discounted_price",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "next_state": {
+          "drug_price": {
+            "min": 1
+          }
+        }
+      },
+      "effects": [
+        {
+          "variable": "drug_price",
+          "operation": "set",
+          "value": {
+            "variable": "company_discounted_price_assumption"
+          },
+          "minimum": null,
+          "maximum": null
+        },
+        {
+          "variable": "company_launch_status",
+          "operation": "set",
+          "value": "launched",
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": [
+        {
+          "event_type": "company_launch",
+          "description": "Company launches product at the configured discounted price"
+        }
+      ]
+    },
+    {
+      "id": "aggressive_price_cut",
+      "name": "Aggressive price cut",
+      "agent_id": "competitor",
+      "description": "Cut competitor price by 20%; configured per-unit contribution is price minus the illustrative unit-cost assumption",
+      "strategy": "price_competition",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "state": {
+          "competitor_price": {
+            "min": 50000
+          }
+        },
+        "next_state": [
+          {
+            "variable": "competitor_price",
+            "operator": "gte",
+            "value": "competitor_unit_cost_assumption"
+          }
+        ]
+      },
+      "effects": [
+        {
+          "variable": "competitor_price",
+          "operation": "multiply",
+          "value": 0.8,
+          "minimum": 50000.0,
+          "maximum": null
+        },
+        {
+          "variable": "competitor_unit_contribution_after_action",
+          "operation": "set",
+          "value": "competitor_price - competitor_unit_cost_assumption",
+          "minimum": null,
+          "maximum": null
+        },
+        {
+          "variable": "competitor_internal_strategy",
+          "operation": "set",
+          "value": "price_competition",
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": [
+        {
+          "event_type": "price_change",
+          "description": "Competitor changes price"
+        }
+      ]
+    },
+    {
+      "id": "increase_promotion",
+      "name": "Increase promotion",
+      "agent_id": "competitor",
+      "description": "Increase competitor promotion and incur the configured illustrative spend",
+      "strategy": "promotion_competition",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "next_state": [
+          {
+            "variable": "competitor_promotion_spend",
+            "operator": "lte",
+            "value": "competitor_promotion_budget_assumption"
+          }
+        ]
+      },
+      "effects": [
+        {
+          "variable": "competitor_promotion",
+          "operation": "add",
+          "value": 0.25,
+          "minimum": null,
+          "maximum": null
+        },
+        {
+          "variable": "competitor_promotion_spend",
+          "operation": "add",
+          "value": {
+            "variable": "competitor_promotion_spend_per_increase_assumption"
+          },
+          "minimum": null,
+          "maximum": null
+        },
+        {
+          "variable": "competitor_internal_strategy",
+          "operation": "set",
+          "value": "promotion_competition",
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": [
+        {
+          "event_type": "competitor_positioning_change",
+          "description": "Competitor increases promotion"
+        }
+      ]
+    },
+    {
+      "id": "maintain_strategy",
+      "name": "Maintain strategy",
+      "agent_id": "competitor",
+      "description": "Maintain current position",
+      "strategy": "maintain_position",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {},
+      "effects": [
+        {
+          "variable": "competitor_internal_strategy",
+          "operation": "set",
+          "value": "maintain_position",
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "restricted_access",
+      "name": "Restricted access",
+      "agent_id": "payer",
+      "description": "Restrict product access",
+      "strategy": "restricted_access",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "state": {
+          "payer_access": {
+            "between": [
+              0,
+              1
+            ]
+          }
+        }
+      },
+      "effects": [
+        {
+          "variable": "payer_access",
+          "operation": "set",
+          "value": 0.55,
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "standard_access",
+      "name": "Standard access",
+      "agent_id": "payer",
+      "description": "Provide standard access",
+      "strategy": "standard_access",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "state": {
+          "payer_access": {
+            "between": [
+              0,
+              1
+            ]
+          }
+        }
+      },
+      "effects": [
+        {
+          "variable": "payer_access",
+          "operation": "set",
+          "value": 0.75,
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "favorable_access",
+      "name": "Favorable access",
+      "agent_id": "payer",
+      "description": "Provide favorable access",
+      "strategy": "favorable_access",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {
+        "state": {
+          "payer_access": {
+            "between": [
+              0,
+              1
+            ]
+          }
+        }
+      },
+      "effects": [
+        {
+          "variable": "payer_access",
+          "operation": "set",
+          "value": 0.9,
+          "minimum": null,
+          "maximum": null
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "slow_adoption",
+      "name": "Slow adoption",
+      "agent_id": "physician",
+      "description": "Slow prescribing uptake",
+      "strategy": "cautious_adoption",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {},
+      "effects": [
+        {
+          "variable": "physician_adoption",
+          "operation": "add",
+          "value": -0.04,
+          "minimum": 0.0,
+          "maximum": null
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "adopt",
+      "name": "Adopt",
+      "agent_id": "physician",
+      "description": "Increase prescribing uptake",
+      "strategy": "adoption",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {},
+      "effects": [
+        {
+          "variable": "physician_adoption",
+          "operation": "add",
+          "value": 0.06,
+          "minimum": null,
+          "maximum": 0.95
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "maintain_adoption",
+      "name": "Maintain adoption",
+      "agent_id": "physician",
+      "description": "Maintain prescribing uptake",
+      "strategy": "maintain_adoption",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {},
+      "effects": [
+        {
+          "variable": "physician_adoption",
+          "operation": "add",
+          "value": 0.02,
+          "minimum": null,
+          "maximum": 0.95
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "high_adherence",
+      "name": "Higher adherence pattern",
+      "agent_id": "patient",
+      "description": "Synthetic illustrative assumption: increase the configured aggregate adherence fraction by 0.15 for this scenario; not empirical patient behavior.",
+      "strategy": "adherence_high",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {},
+      "effects": [
+        {
+          "variable": "patient_adherence_rate",
+          "operation": "add",
+          "value": 0.15,
+          "minimum": null,
+          "maximum": 0.95
+        }
+      ],
+      "generated_events": []
+    },
+    {
+      "id": "moderate_adherence",
+      "name": "Moderate adherence pattern",
+      "agent_id": "patient",
+      "description": "Synthetic illustrative assumption: decrease the configured aggregate adherence fraction by 0.05 for this scenario; not empirical patient behavior.",
+      "strategy": "adherence_moderate",
+      "parameters": {},
+      "parameter_schema": {},
+      "constraints": {},
+      "effects": [
+        {
+          "variable": "patient_adherence_rate",
+          "operation": "add",
+          "value": -0.05,
+          "minimum": 0.1,
+          "maximum": null
+        }
+      ],
+      "generated_events": []
+    }
+  ],
+  "trigger_definitions": [
+    {
+      "id": "company-start",
+      "event_types": [
+        "simulation_start"
+      ],
+      "affected_agents": [
+        "company"
+      ],
+      "state_condition": null,
+      "priority": 100,
+      "cooldown": 0,
+      "expires_after": null
+    },
+    {
+      "id": "competitor-response",
+      "event_types": [
+        "company_launch",
+        "strategy_expired"
+      ],
+      "affected_agents": [
+        "competitor"
+      ],
+      "state_condition": null,
+      "priority": 90,
+      "cooldown": 0,
+      "expires_after": null
+    },
+    {
+      "id": "payer-review",
+      "event_types": [
+        "company_launch",
+        "price_change",
+        "payer_review"
+      ],
+      "affected_agents": [
+        "payer"
+      ],
+      "state_condition": null,
+      "priority": 80,
+      "cooldown": 0,
+      "expires_after": null
+    },
+    {
+      "id": "physician-response",
+      "event_types": [
+        "company_launch",
+        "price_change",
+        "competitor_positioning_change"
+      ],
+      "affected_agents": [
+        "physician"
+      ],
+      "state_condition": null,
+      "priority": 70,
+      "cooldown": 0,
+      "expires_after": null
+    },
+    {
+      "id": "patient-launch-response",
+      "event_types": [
+        "company_launch"
+      ],
+      "affected_agents": [
+        "patient"
+      ],
+      "state_condition": null,
+      "priority": 60,
+      "cooldown": 0,
+      "expires_after": null
+    }
+  ],
+  "transition_rules": [
+    {
+      "id": "quarterly-market-dynamics",
+      "event_type": "time_step",
+      "effects": [
+        {
+          "variable": "market_share",
+          "operation": "add",
+          "value": "0.025 * payer_access * physician_adoption * patient_adherence_rate * 10 * (1 + efficacy_advantage) * min(1.25, competitor_price / max(drug_price, 1)) * max(0.65, 1 - (competitor_promotion - 1) * 0.08)",
+          "minimum": 0.0,
+          "maximum": 0.8
+        },
+        {
+          "variable": "competitor_market_share",
+          "operation": "add",
+          "value": "-0.45 * 0.025 * payer_access * physician_adoption * patient_adherence_rate * 10 * (1 + efficacy_advantage) * min(1.25, competitor_price / max(drug_price, 1)) * max(0.65, 1 - (competitor_promotion - 1) * 0.08)",
+          "minimum": 0.05,
+          "maximum": 0.8
+        },
+        {
+          "variable": "physician_adoption",
+          "operation": "add",
+          "value": "0.015 * payer_access",
+          "minimum": null,
+          "maximum": 0.95
+        },
+        {
+          "variable": "patient_adoption",
+          "operation": "add",
+          "value": "0.01 * payer_access",
+          "minimum": null,
+          "maximum": 0.95
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "time_horizon": 8,
+    "step_duration": 1.0,
+    "step_unit": "quarter",
+    "initial_events": [
+      {
+        "id": "start",
+        "time": 0,
+        "event_type": "simulation_start",
+        "description": "Simulation begins",
+        "data": {},
+        "priority": 100
+      }
+    ],
+    "scheduled_events": [
+      {
+        "id": "payer-review-q4",
+        "time": 4,
+        "event_type": "payer_review",
+        "description": "Scheduled payer review",
+        "data": {},
+        "priority": 85
+      },
+      {
+        "id": "strategy-expiry-q4",
+        "time": 4,
+        "event_type": "strategy_expired",
+        "description": "Configured strategy review point",
+        "data": {},
+        "priority": 95
+      },
+      {
+        "id": "payer-review-q8",
+        "time": 8,
+        "event_type": "payer_review",
+        "description": "Scheduled payer review",
+        "data": {},
+        "priority": 85
+      },
+      {
+        "id": "strategy-expiry-q8",
+        "time": 8,
+        "event_type": "strategy_expired",
+        "description": "Configured strategy review point",
+        "data": {},
+        "priority": 95
+      }
+    ],
+    "transient_variables": [],
+    "decision_policy": "rule_based",
+    "llm_max_calls": null,
+    "llm_max_total_tokens": null
+  },
+  "forecast_model_id": "reference_product",
+  "product_history_id": null,
+  "reference_history_id": "illustrative-rival-share-ramp",
+  "reference_peak": 0.45,
+  "reference_profile": "",
+  "reference_rationale": "",
+  "scenario_generation": {
+    "policy": "diversity",
+    "max_scenarios": 9,
+    "diversity_by_agents": [
+      "competitor",
+      "payer"
+    ],
+    "safety_limit": 1000
+  },
+  "external_drivers": []
+}

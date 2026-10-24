@@ -54,7 +54,10 @@ def test_builder_http_crud_validation_run_and_tree(tmp_path, monkeypatch):
         else:
             raise AssertionError("FastAPI server did not start")
 
-        _, definition = request("/simulations/templates/market_pricing_competition")
+        # Read from tests/fixtures rather than the example picker: this is the only definition whose
+        # scenario policy branches four ways, which is what the tree assertions below check.
+        definition = json.loads((project / "tests" / "fixtures" / "market_pricing_competition.json")
+                                .read_text(encoding="utf-8"))
         status, created = request("/simulations", "POST", definition)
         assert status == 201
         simulation_id = created["simulation_id"]
@@ -87,6 +90,11 @@ def test_builder_http_crud_validation_run_and_tree(tmp_path, monkeypatch):
         duplicate = request(f"/simulations/{simulation_id}/duplicate", "POST")[1]["simulation_id"]
         assert request(f"/simulations/{duplicate}")[0] == 200
         assert request(f"/simulations/{duplicate}", "DELETE")[0] == 204
+        # The UI's Discard relies on the deleted id vanishing from both the list and the record.
+        assert duplicate not in [item["simulation_id"] for item in request("/simulations")[1]]
+        with pytest.raises(urllib.error.HTTPError) as gone:
+            request(f"/simulations/{duplicate}")
+        assert gone.value.code == 404
         assert request(f"/simulations/{simulation_id}", "DELETE")[0] == 204
     finally:
         server.should_exit = True

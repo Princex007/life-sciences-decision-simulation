@@ -78,6 +78,16 @@ class SimulationDefinition(BaseModel):
     transition_rules: list[TransitionRule] = Field(default_factory=list)
     settings: SimulationSettings = Field(default_factory=SimulationSettings)
     forecast_model_id: str | None = None
+    # A stored product history is data, not configuration: the definition points at one
+    # by ID and the forecasting layer reads the series from the history store.
+    product_history_id: str | None = None
+    # Reference-based forecasting reads a DIFFERENT product's stored series and rescales
+    # its recorded ramp onto the peak entered here. The profile is what the reference
+    # suggestion is asked about; the rationale is what the model said when it picked.
+    reference_history_id: str | None = None
+    reference_peak: float | None = None
+    reference_profile: str = Field(default="", max_length=4000)
+    reference_rationale: str = Field(default="", max_length=600)
     scenario_generation: ScenarioGenerationSettings = Field(default_factory=ScenarioGenerationSettings)
     external_drivers: list[ExternalDriver] = Field(default_factory=list)
 

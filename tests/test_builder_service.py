@@ -1,10 +1,17 @@
 import pytest
 
+from pathlib import Path
+
 from app.services.simulation_builder import DefinitionValidationError, SimulationBuilderService
-from app.domain.definitions import TransitionRule
+from app.domain.definitions import SimulationDefinition, TransitionRule
 from app.domain.agent import AgentDefinition
 from app.domain.action import ActionDefinition, ActionEffect
 from app.domain.definitions import TriggerDefinition
+
+# Retired from the example picker, kept as a fixture: it is the only definition in the repository
+# with a `sales` world variable and a `market_open` opening event, which the test below adds an
+# action and a trigger against.
+PRICING_FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "market_pricing_competition.json"
 
 
 @pytest.fixture
@@ -14,7 +21,7 @@ def service(tmp_path):
 
 
 def test_templates_validate_and_local_crud_round_trip(service):
-    definition = service.load_template("market_pricing_competition")
+    definition = service.load_template("us_drug_launch")
     assert service.validate(definition) == []
     service.create(definition)
     loaded = service.get(definition.metadata.id)
@@ -29,7 +36,7 @@ def test_templates_validate_and_local_crud_round_trip(service):
 
 
 def test_duplicate_uses_available_local_id(service):
-    source = service.load_template("market_pricing_competition")
+    source = service.load_template("us_drug_launch")
     service.create(source)
     first = service.duplicate(source.metadata.id)
     second = service.duplicate(source.metadata.id)
@@ -39,7 +46,7 @@ def test_duplicate_uses_available_local_id(service):
 
 
 def test_definition_can_add_arbitrary_agent_action_and_trigger(service):
-    definition = service.load_template("market_pricing_competition")
+    definition = SimulationDefinition.from_json(str(PRICING_FIXTURE))
     definition.agents.append(AgentDefinition(id="market_observer", name="Market Observer",
         objective="Record market activity", available_actions=["record_activity"],
         decision_policy={"default_actions": ["record_activity"]}))
@@ -55,14 +62,14 @@ def test_definition_can_add_arbitrary_agent_action_and_trigger(service):
 
 
 def test_validation_reports_broken_agent_action_references(service):
-    definition = service.load_template("market_pricing_competition")
+    definition = service.load_template("us_drug_launch")
     definition.action_definitions[0].agent_id = "missing-agent"
     with pytest.raises(DefinitionValidationError, match="unknown agent missing-agent"):
         service.validate(definition)
 
 
 def test_validation_rejects_unregistered_forecast_and_event_references(service):
-    definition = service.load_template("market_pricing_competition")
+    definition = service.load_template("us_drug_launch")
     definition.forecast_model_id = "unknown_forecast"
     definition.transition_rules.append(TransitionRule(id="bad-transition", event_type="never_emitted"))
     with pytest.raises(DefinitionValidationError) as caught:
@@ -72,7 +79,7 @@ def test_validation_rejects_unregistered_forecast_and_event_references(service):
 
 
 def test_saved_id_must_match_metadata_and_path_ids_are_safe(service):
-    definition = service.load_template("market_pricing_competition")
+    definition = service.load_template("us_drug_launch")
     with pytest.raises(DefinitionValidationError, match="must match metadata.id"):
         service.update("other-id", definition)
     with pytest.raises(ValueError, match="only letters"):

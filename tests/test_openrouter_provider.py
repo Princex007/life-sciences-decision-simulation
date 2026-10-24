@@ -15,7 +15,7 @@ from app.domain.definitions import SimulationDefinition
 from app.services.simulation_runner import SimulationRunnerService
 
 PROJECT = Path(__file__).resolve().parents[1]
-SMOKE_EXAMPLE = PROJECT / "examples" / "local_multi_agent_smoke.json"
+SMOKE_EXAMPLE = PROJECT / "tests" / "fixtures" / "local_multi_agent_smoke.json"
 
 
 class FakeHTTPResponse:
@@ -242,13 +242,54 @@ def test_non_retryable_http_status_is_not_retried(monkeypatch):
 
 def test_retryable_status_stops_at_the_attempt_cap(monkeypatch):
     requests = install_transport(monkeypatch, [
-        HTTPError("https://openrouter.ai", 429, "Too Many Requests", {}, None)])
+        HTTPError("https://openrouter.ai", 500, "Server Error", {}, None)])
     openrouter_env(monkeypatch, LLM_MAX_ATTEMPTS="2")
     client = OpenAICompatibleLLMClient.from_environment()
     client.retry_backoff_seconds = 0
-    with pytest.raises(LLMClientError, match="HTTP 429"):
+    with pytest.raises(LLMClientError, match="HTTP 500"):
         client.generate_decision(None, DecisionPrompt(system="s", user="u"))
     assert len(requests) == 2
+
+
+def test_throttled_request_outlasts_the_attempt_cap_without_spending(monkeypatch):
+    """A 429 never reached the model, so waiting it out cannot increase cost."""
+    sleeps = []
+    monkeypatch.setattr(llm_module.time, "sleep", sleeps.append)
+    requests = install_transport(monkeypatch, [
+        HTTPError("https://openrouter.ai", 429, "Too Many Requests", {}, None)])
+    openrouter_env(monkeypatch, LLM_MAX_ATTEMPTS="2")
+    client = OpenAICompatibleLLMClient.from_environment()
+    with pytest.raises(LLMClientError, match="rate limiting this model"):
+        client.generate_decision(None, DecisionPrompt(system="s", user="u"))
+    assert len(requests) == llm_module.RATE_LIMIT_MAX_ATTEMPTS
+    assert sleeps == [2.0, 4.0, 8.0, 16.0]
+
+
+def test_provider_retry_after_header_sets_the_wait(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(llm_module.time, "sleep", sleeps.append)
+    requests = install_transport(monkeypatch, [
+        HTTPError("https://openrouter.ai", 429, "Too Many Requests",
+                  {"Retry-After": "3"}, None),
+        envelope("{}")])
+    openrouter_env(monkeypatch)
+    completion = OpenAICompatibleLLMClient.from_environment().generate_decision(
+        None, DecisionPrompt(system="s", user="u"))
+    assert len(requests) == 2
+    assert sleeps == [3.0]
+    assert completion.attempts == 2
+
+
+def test_retry_after_header_is_read_safely():
+    def header(value):
+        return HTTPError("https://openrouter.ai", 429, "Too Many Requests", value, None)
+
+    assert llm_module._retry_after_seconds(header({"Retry-After": "7.5"})) == 7.5
+    assert llm_module._retry_after_seconds(
+        header({"Retry-After": "600"})) == llm_module.RATE_LIMIT_MAX_WAIT_SECONDS
+    for unusable in ({}, {"Retry-After": ""}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+                     {"Retry-After": "-4"}):
+        assert llm_module._retry_after_seconds(header(unusable)) is None
 
 
 def test_attempt_cap_is_bounded_by_configuration(monkeypatch):

@@ -8,6 +8,39 @@ from typing import Any, Mapping
 from app.domain.world import WorldState
 
 
+def selection_diagnostics(decision, objective: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Separate what the configured scores preferred from what the run selected.
+
+    A score preference is a configured ranking of feasible actions, not a claim
+    that the preferred action is correct in the real world. `fallback_dependent`
+    marks decisions where an objective was configured but the margin was too
+    small to decide, so the configured policy chose the action instead.
+    """
+    scores = decision.decision_context.objective_scores or {}
+    ranked = sorted(scores.items(), key=lambda item: (-item[1]["score"], item[0]))
+    highest = ranked[0] if ranked else None
+    runner_up = ranked[1] if len(ranked) > 1 else None
+    margin = (highest[1]["score"] - runner_up[1]["score"]
+              if highest and runner_up else None)
+    tolerance = objective.get("score_tie_tolerance") if objective else None
+    source = decision.decision_source
+    return {
+        "objective_configured": bool(objective),
+        "highest_scoring_feasible_action": highest[0] if highest else None,
+        "highest_score": highest[1]["score"] if highest else None,
+        "runner_up_action": runner_up[0] if runner_up else None,
+        "runner_up_score": runner_up[1]["score"] if runner_up else None,
+        "score_margin": margin,
+        "tie_tolerance": tolerance,
+        "selected_action": decision.action.action_id if decision.action else None,
+        "decision_source": source,
+        "decisive": source == "objective_scorer",
+        "fallback_dependent": bool(objective) and source != "objective_scorer",
+        "objective_scores": {action_id: value["score"]
+                              for action_id, value in scores.items()},
+    }
+
+
 class ObjectiveScorer:
     """Combine explicitly configured, normalized preview metrics for evaluation.
 

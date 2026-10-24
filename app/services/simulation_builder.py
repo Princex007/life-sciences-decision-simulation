@@ -1,9 +1,11 @@
 """Validated local JSON persistence for SimulationDefinition objects."""
 from __future__ import annotations
 import json
+import math
 import re
 from pathlib import Path
 from app.domain.definitions import SimulationDefinition
+from app.forecasting.registry import default_registry
 from app.simulation.external_drivers import validate_external_drivers
 
 class DefinitionValidationError(ValueError):
@@ -11,20 +13,36 @@ class DefinitionValidationError(ValueError):
         self.errors = errors
         super().__init__("; ".join(errors))
 
+def _positive_finite(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+
 class SimulationBuilderService:
     """CRUD-like local builder service; no database or engine coupling."""
     def __init__(self, storage_dir: Path | str | None = None,
                  examples_dir: Path | str | None = None,
-                 forecast_model_ids: set[str] | None = None):
+                 forecast_model_ids: set[str] | None = None,
+                 history_store=None):
         project = Path(__file__).resolve().parents[2]
         self.storage_dir = Path(storage_dir) if storage_dir else project / "simulations"
         self.examples_dir = Path(examples_dir) if examples_dir else project / "examples"
-        self.forecast_model_ids = forecast_model_ids or {"launch_revenue", "state_metrics"}
+        self.forecast_model_ids = forecast_model_ids or default_registry().model_ids
+        self.forecast_requirements = {info.model_id: info.requires
+                                      for info in default_registry().catalog()}
+        self.history_store = history_store
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
     def list(self) -> list[SimulationDefinition]:
         return [SimulationDefinition.from_json(str(path))
                 for path in sorted(self.storage_dir.glob("*.json"))]
+
+    def referencing_history(self, history_id: str) -> list[str]:
+        """Saved simulations that point at a stored history, so deleting it stays visible.
+
+        A series can be referenced as this product's own history or as another
+        simulation's reference analogue; both break when the series disappears.
+        """
+        return sorted(item.metadata.id for item in self.list()
+                      if history_id in (item.product_history_id, item.reference_history_id))
 
     def get(self, simulation_id: str) -> SimulationDefinition:
         path = self._path(simulation_id)
@@ -133,6 +151,7 @@ class SimulationBuilderService:
                     errors.append(f"Transition rule {rule.id} references unknown event {event_type}")
         if definition.forecast_model_id and definition.forecast_model_id not in self.forecast_model_ids:
             errors.append(f"Forecast model {definition.forecast_model_id} is not registered")
+        errors.extend(self._forecast_requirements(definition))
         if definition.settings.time_horizon < 1:
             errors.append("Simulation time_horizon must be positive.")
         for event in definition.settings.scheduled_events:
@@ -140,6 +159,51 @@ class SimulationBuilderService:
                 errors.append(f"Scheduled event {event.id} is outside the simulation horizon.")
         if errors:
             raise DefinitionValidationError(errors)
+        return []
+
+    def _forecast_requirements(self, definition: SimulationDefinition) -> list[str]:
+        """Check what the selected forecast model needs beyond the run itself.
+
+        A model that cannot produce anything is a dead option, so the requirement is a
+        validation error rather than an empty result panel.
+        """
+        model = definition.forecast_model_id
+        errors = []
+        errors.extend(self._stored_series_errors(definition.product_history_id, "Product history"))
+        errors.extend(self._stored_series_errors(definition.reference_history_id, "Reference history"))
+        if definition.reference_history_id and definition.reference_history_id == definition.product_history_id:
+            errors.append("The reference product must be a different stored series from this "
+                          "product's own history.")
+        if self.forecast_requirements.get(model, "") == "product_history" and not definition.product_history_id:
+            errors.append("The selected historical forecast needs a stored product history: import a "
+                          "CSV or Excel file in the home page forecaster, save it, then pick it here.")
+        if self.forecast_requirements.get(model, "") == "reference_product":
+            if not definition.reference_history_id:
+                errors.append("The selected reference forecast needs a stored reference product: pick one of "
+                              "the histories below, or ask the model to suggest one from the product profile.")
+            if not _positive_finite(definition.reference_peak):
+                errors.append("The selected reference forecast needs a positive peak value: it is the level "
+                              "the reference product's recorded ramp is stretched to.")
+        if self.forecast_requirements.get(model, "") == "external_drivers":
+            active = [driver for driver in definition.external_drivers
+                      if driver.enabled and any(not pathway.qualitative_only
+                                                for pathway in driver.pathways)]
+            if not active:
+                errors.append("The selected driver forecast needs at least one enabled external driver "
+                              "with a quantitative pathway; qualitative-only pathways are never applied.")
+        return errors
+
+    def _stored_series_errors(self, history_id: str | None, label: str) -> list[str]:
+        if not history_id:
+            return []
+        if self.history_store is None:
+            return [f"Simulation references {label.lower()} '{history_id}' "
+                    "but no history store is configured."]
+        try:
+            self.history_store.get(history_id)
+        except FileNotFoundError:
+            return [f"{label} '{history_id}' is not stored in histories/. "
+                    "Re-save the series or clear the reference."]
         return []
 
     def _path(self, simulation_id: str) -> Path:

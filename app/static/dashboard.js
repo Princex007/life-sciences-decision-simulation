@@ -2,7 +2,12 @@
    driver effects, decision audit, and driver-variant comparison. */
 
 const SVG_NS='http://www.w3.org/2000/svg';
-const SERIES_COLORS=['#0d766e','#c2703d','#3f6ea5','#8a5aa8','#2f8f5b','#b04a5a','#6b7a2f','#4a6f7a'];
+const SERIES_FALLBACK=['#0d766e','#c2703d','#3f6ea5','#8a5aa8','#2f8f5b','#b04a5a','#6b7a2f','#4a6f7a'];
+function seriesColor(index){const tokens=getComputedStyle(document.documentElement);
+  return tokens.getPropertyValue(`--series-${(index%SERIES_FALLBACK.length)+1}`).trim()||SERIES_FALLBACK[index%SERIES_FALLBACK.length];}
+function edgeColor(status){const tokens=getComputedStyle(document.documentElement);
+  const key=status==='pruned'?'--edge-pruned':'--edge';
+  return tokens.getPropertyValue(key).trim()||(status==='pruned'?'#c3cfcb':'#8fa9a3');}
 const MAX_FLOW_NODES=300;
 const DECISION_SOURCE_HELP={
   objective_scorer:'Chosen because the configured evaluation objective scored it clearly above the runner-up.',
@@ -59,8 +64,8 @@ function renderDashboard(results,definition){
   drawTree(results.root,scenarios);
   drawFlowchart(results.root,scenarios);
   drawComparison(scenarios);
-  drawCharts(scenarios);
-  drawTimeSeries(scenarios,definition);
+  drawCharts(scenarios,results.summary);
+  drawTimeSeries(scenarios,definition,results.summary);
   drawDriverEffects(results);
   drawDecisionAudit(scenarios);
 }
@@ -72,6 +77,11 @@ function drawSummary(summary){
     ['Forecast model',(summary.forecast_model||'none').replaceAll('_',' ')],['Scenario policy',summary.scenario_policy],
     ['Decision policy',(summary.decision_policy||'').replaceAll('_',' ')],
     ['Active drivers',(summary.key_drivers||[]).length?(summary.key_drivers||[]).join(', '):'none']];
+  const analogue=summary.reference_history;
+  if(summary.forecast_model==='reference_product'&&analogue&&!analogue.missing){
+    cards.push(['Reference analogue',analogue.scale==null?analogue.name
+      :`${analogue.name} ×${fmt(analogue.scale)}`]);
+  }
   const usage=summary.llm_usage;
   if(usage){
     cards.push(['Provider calls',usage.provider_calls],['Tokens reported',usage.total_tokens||0]);
@@ -96,6 +106,22 @@ function drawAssumptions(summary,definition){
     const heading=document.createElement('b');heading.textContent='External-driver assumptions';section.append(heading);
     const list=document.createElement('ul');driverLabels.forEach(text=>{const li=document.createElement('li');li.textContent=text;list.append(li);});
     section.append(list);box.append(section);
+  }
+  const analogue=summary.reference_history;
+  if(analogue&&!analogue.missing&&definition?.reference_history_id){
+    const section=document.createElement('div');section.className='assumption-group';
+    const heading=document.createElement('b');heading.textContent='Reference analogue';section.append(heading);
+    section.append(tableFrom(['Item','Value'],[
+      ['Series borrowed',`${analogue.name} · ${analogue.points} recorded periods, graded `
+        +String(analogue.evidence_grade||'unspecified').replaceAll('_',' ')
+        +` from ${analogue.source||'an unstated source'}`],
+      ['Peak you entered',definition.reference_peak==null?'not set':fmt(definition.reference_peak)],
+      ['Rescaling applied',analogue.scale==null?'none (no peak)':`${fmt(analogue.scale)}× every recorded period`],
+      ['Why this product',definition.reference_rationale||'chosen by you without a recorded reason'],
+      ['Profile it was matched against',definition.reference_profile||'no profile was written']]));
+    section.append(note('The ramp shape is another product\'s recorded history; the peak level and the '
+      +'choice of analogue are assumptions. Neither is evidence that this product will sell like that one.'));
+    box.append(section);
   }
   const evidence=summary.variable_evidence||{};
   const names=Object.keys(evidence);
@@ -169,17 +195,28 @@ function drawFlowchart(root,scenarios){
   const W=206,H=70,GX=26,GY=40;
   const maxSlot=Math.max(...nodes.map(entry=>entry.slot),0);
   const maxDepth=Math.max(...nodes.map(entry=>entry.depth),0);
-  const width=(maxSlot+1)*(W+GX)+GX,height=(maxDepth+1)*(H+GY)+GY;
+  // Depth-first stacking turns a long run into a diagram thousands of pixels
+  // tall, so once the tree outgrows a readable panel walk the trace across rows.
+  const chain=maxDepth*(H+GY)+GY>1400;
+  const perRow=chain?Math.max(3,Math.min(8,Math.round(Math.sqrt(nodes.length*2)))):maxSlot+1;
+  const rows=chain?Math.ceil(nodes.length/perRow):maxDepth+1;
+  const width=perRow*(W+GX)+GX,height=rows*(H+GY)+GY;
   const svgRoot=svgEl('svg',{viewBox:`0 0 ${width} ${height}`,width,height,role:'img','aria-label':'Decision flowchart generated from the recorded simulation trace'});
   const position=new Map();
-  nodes.forEach(entry=>position.set(entry.node.node_id,{x:GX+entry.slot*(W+GX),y:GY+entry.depth*(H+GY)}));
+  nodes.forEach((entry,index)=>position.set(entry.node.node_id,
+    {x:GX+(chain?index%perRow:entry.slot)*(W+GX),y:GY+(chain?Math.floor(index/perRow):entry.depth)*(H+GY)}));
   nodes.forEach(entry=>{
     if(!entry.parent)return;
     const from=position.get(entry.parent.node.node_id),to=position.get(entry.node.node_id);
-    const x1=from.x+W/2,y1=from.y+H,x2=to.x+W/2,y2=to.y;
-    svgRoot.append(svgEl('path',{d:`M ${x1} ${y1} C ${x1} ${y1+GY/2}, ${x2} ${y2-GY/2}, ${x2} ${y2}`,
-      fill:'none',stroke:entry.node.status==='pruned'?'#c3cfcb':'#8fa9a3','stroke-width':'1.6',
-      'stroke-dasharray':entry.node.status==='pruned'?'4 3':entry.node.branch_role==='counterfactual'?'6 3':'none'}));
+    const cls=`flow-edge${entry.node.status==='pruned'?' is-pruned':''}${entry.node.branch_role==='counterfactual'?' is-counterfactual':''}`;
+    const mid=(from.y+H+to.y)/2;
+    // Horizontal step within a row, right-angle sweep when the chain wraps.
+    const d=Math.abs(to.y-from.y)<1
+      ?`M ${from.x+W} ${from.y+H/2} C ${from.x+W+GX/2} ${from.y+H/2}, ${to.x-GX/2} ${to.y+H/2}, ${to.x} ${to.y+H/2}`
+      :to.x<from.x
+        ?`M ${from.x+W/2} ${from.y+H} L ${from.x+W/2} ${mid} L ${to.x+W/2} ${mid} L ${to.x+W/2} ${to.y}`
+        :`M ${from.x+W/2} ${from.y+H} C ${from.x+W/2} ${from.y+H+GY/2}, ${to.x+W/2} ${to.y-GY/2}, ${to.x+W/2} ${to.y}`;
+    svgRoot.append(svgEl('path',{class:cls,d,fill:'none','stroke-width':'1.6'}));
   });
   nodes.forEach(entry=>{
     const node=entry.node;const at=position.get(node.node_id);
@@ -220,63 +257,280 @@ function drawFlowchart(root,scenarios){
 }
 
 /* ---------- variable time series ---------- */
-function drawTimeSeries(scenarios,definition){
-  const box=byId('timeseries');box.replaceChildren();box.classList.remove('muted');
-  const withSnapshots=(scenarios||[]).filter(scenario=>(scenario.snapshots||[]).length);
-  if(!withSnapshots.length){box.textContent='No per-step state snapshots were recorded for this run.';return;}
-  const initial=definition?.initial_world_state?.variables||{};
+function numericSeriesNames(scenarios,initial){
   const numeric=new Set();
-  withSnapshots.forEach(scenario=>scenario.snapshots.forEach(snap=>Object.entries(snap.variables||{}).forEach(([key,value])=>{
+  scenarios.forEach(scenario=>scenario.snapshots.forEach(snap=>Object.entries(snap.variables||{}).forEach(([key,value])=>{
     if(typeof value==='number'&&!Array.isArray(value))numeric.add(key);
     else if(typeof initial[key]==='number')numeric.add(key);})));
-  const names=[...numeric].filter(name=>withSnapshots.some(scenario=>scenario.snapshots.some(snap=>typeof snap.variables?.[name]==='number')));
-  if(!names.length){box.textContent='No numeric world variables were recorded across time steps.';return;}
-  const CAP=8;
-  names.slice(0,CAP).forEach(name=>box.append(seriesChart(name,withSnapshots,initial)));
-  if(names.length>CAP)box.append(note(`Showing the first ${CAP} of ${names.length} numeric variables. The remaining variables are listed in the scenario detail panel.`));
-  box.append(note('Each line is one retained scenario. Points are the recorded world state after each time step; t0 is the configured initial state.','assumption-note'));
+  return [...numeric].filter(name=>scenarios.some(scenario=>scenario.snapshots.some(snap=>typeof snap.variables?.[name]==='number')));
 }
-function seriesChart(name,scenarios,initial){
-  const W=560,H=170,PAD_L=58,PAD_R=12,PAD_T=12,PAD_B=26;
-  const series=scenarios.map((scenario,index)=>{
-    const start=typeof initial[name]==='number'?[{time:0,value:initial[name]}]:[];
-    const points=[...start,...(scenario.snapshots||[]).filter(snap=>typeof snap.variables?.[name]==='number').map(snap=>({time:snap.time,value:snap.variables[name]}))];
-    return {scenario,points,color:SERIES_COLORS[index%SERIES_COLORS.length]};
-  }).filter(item=>item.points.length>1);
+function storedHistoryChart(summary,scenarios){
+  const history=summary&&summary.product_history;
+  if(!history)return null;
+  if(history.missing)return note(`The definition points at product history '${history.history_id}', but that series is not in histories/, so no historical forecast was fitted against it.`,'assumption-note');
+  /* The projection is keyed by the history's own name, so it can never be mistaken for a
+     variable this run recorded — the two lines are drawn and labelled separately. */
+  const name=history.name;
+  const projected=(scenarios||[]).map(scenario=>scenario.forecast?.projections?.[name]||[])
+    .find(values=>values.length)||[];
+  /* A definition can keep a history reference while a different forecast model runs, so a
+     series this run never fitted is not drawn: the chart would show data nothing used. */
+  if(!projected.length)return null;
+  const series={scenario_id:'stored-history',name:`${history.name} (stored history)`,
+    snapshots:(history.values||[]).map((value,index)=>({time:index,variables:{[name]:value}})),
+    forecast:{projections:{[name]:projected}}};
+  const recorded=(history.values||[]).length;
+  const fittedFrom=Number(summary.time_horizon??recorded-1)+1;
+  const projectionStart=fittedFrom>=recorded?fittedFrom:recorded;
+  const section=seriesChart(name,[series],{},'recorded','projected past the recorded history',projectionStart);
+  section.append(note(`These ${recorded} points are the stored history${history.source?` (${history.source})`:''}, graded ${String(history.evidence_grade||'unspecified').replaceAll('_',' ')} — this run did not produce them.`
+    +` The dashed line continues their least-squares fit from t${projectionStart}; it is an extrapolation, not a measurement.`
+    +(fittedFrom<recorded?` The recorded series runs past this run's ${summary.time_horizon}-step horizon, so the projection is drawn immediately after the recorded periods.`:'')));
+  return section;
+}
+function referenceAnalogueChart(summary,scenarios){
+  const item=summary&&summary.reference_history;
+  if(!item)return null;
+  if(item.missing)return note(`The definition points at reference history '${item.history_id}', but that series is not in histories/, so no analogue could be scaled.`,'assumption-note');
+  const name=item.name;
+  const projected=(scenarios||[]).map(scenario=>scenario.forecast?.projections?.[name]||[])
+    .find(values=>values.length)||[];
+  /* Only drawn when this run's forecast actually used the reference: a definition can
+     keep a reference selection while a different model runs. */
+  if(!projected.length)return null;
+  /* The scaled series is what the model fitted, so the solid line is the borrowed shape
+     after rescaling rather than the raw recorded numbers. */
+  const values=(item.scaled_values&&item.scaled_values.length)?item.scaled_values:(item.values||[]);
+  const series={scenario_id:'reference-analogue',name:`${name} (reference, rescaled)`,
+    snapshots:values.map((value,index)=>({time:index,variables:{[name]:value}})),
+    forecast:{projections:{[name]:projected}}};
+  const recorded=values.length;
+  const fittedFrom=Number(summary.time_horizon??recorded-1)+1;
+  const projectionStart=fittedFrom>=recorded?fittedFrom:recorded;
+  const section=seriesChart(name,[series],{},'recorded analogue','projected past the recorded analogue',projectionStart);
+  const scale=item.scale;
+  const rescaled=scale==null
+    ?`This line is another product's recorded series, shown unscaled because no peak value was entered.`
+    :`This line is another product's recorded series multiplied by ${fmt(scale)}, so its own peak of `
+     +`${fmt(Math.max(...(item.values||[0])))} lands on the ${fmt(item.peak)} you entered.`;
+  section.append(note(rescaled
+    +` The ramp shape comes from ${recorded} recorded periods graded ${String(item.evidence_grade||'unspecified').replaceAll('_',' ')}`
+    +(item.source?` (${item.source})`:'')+'; the peak level is an assumption you typed, not a measurement. '
+    +'The dashed line continues the least-squares fit of the rescaled series; it is an extrapolation, not a second product\'s actual sales.'));
+  return section;
+}
+function drawTimeSeries(scenarios,definition,summary){
+  const box=byId('timeseries');box.replaceChildren();box.classList.remove('muted');
+  const withSnapshots=(scenarios||[]).filter(scenario=>(scenario.snapshots||[]).length);
+  const initial=definition?.initial_world_state?.variables||{};
+  const names=withSnapshots.length?numericSeriesNames(withSnapshots,initial):[];
+  const CAP=8;
+  /* Variables the forecast actually projects are the informative ones, so they get the
+     chart slots before variables that only sit still across the run. */
+  const projectedName=name=>(scenarios||[]).some(scenario=>(scenario.forecast?.projections||{})[name]);
+  const shown=[...names].sort((a,b)=>Number(projectedName(b))-Number(projectedName(a))).slice(0,CAP);
+  shown.forEach(name=>box.append(seriesChart(name,withSnapshots,initial)));
+  if(names.length>CAP)box.append(note(`Showing ${CAP} of ${names.length} numeric variables: projected series first, then the rest. All of them are listed in the scenario detail panel.`));
+  const history=storedHistoryChart(summary,scenarios);
+  if(history)box.append(history);
+  const analogue=referenceAnalogueChart(summary,scenarios);
+  if(analogue)box.append(analogue);
+  if(!box.children.length){
+    box.textContent=withSnapshots.length?'No numeric world variables were recorded across time steps.'
+      :'No per-step state snapshots were recorded for this run.';
+    return;}
+  if(withSnapshots.length){
+    /* Only a projection that continues a recorded world variable belongs in this caption.
+       The stored history is captioned on its own chart, from its own data. */
+    const worldProjected=shown.some(name=>(scenarios||[]).some(scenario=>(scenario.forecast?.projections||{})[name]));
+    box.append(note(worldProjected
+      ?'Solid lines are the recorded world state after each time step; t0 is the configured initial state. Dashed lines continue the fitted straight line past the simulated horizon — an extrapolation of the trend this run produced, not a measurement.'
+      :'Each line is one retained scenario. Points are the recorded world state after each time step; t0 is the configured initial state.','assumption-note'));
+  }
+}
+/* One line-drawing implementation for every chart in the app: run scenarios, stored histories,
+   analogues, driver indexes and the standalone forecasters. It draws recorded points, a fitted
+   model line, and a projected continuation, and it is interactive: legend entries toggle series,
+   hovering a point reports the period, series, value and unit, and clicking one reports it to the
+   caller so a panel can reveal that period's own detail. Nothing is interpolated between recorded
+   points — a line segment only joins periods the model actually produced. */
+function seriesChart(name,scenarios,initial,horizonWord='simulated',caption='projected past the simulated horizon',projectionStart=null,options={}){
+  const W=560,H=250,PAD_L=58,PAD_R=14,PAD_T=16,PAD_B=30;
+  const unit=options.unit||'';
+  const periodWord=options.periodWord||'period';
   const section=document.createElement('section');section.className='metric-chart';
-  const heading=document.createElement('h3');heading.textContent=name.replaceAll('_',' ');section.append(heading);
-  if(!series.length){section.append(note('This variable was not numeric in the recorded snapshots.'));return section;}
-  const times=series.flatMap(item=>item.points.map(point=>point.time));
-  const values=series.flatMap(item=>item.points.map(point=>point.value));
-  const minT=Math.min(...times),maxT=Math.max(...times);
-  let minV=Math.min(...values),maxV=Math.max(...values);
-  if(minV===maxV){minV-=1;maxV+=1;}
-  const spanT=Math.max(maxT-minT,1),spanV=maxV-minV;
-  const x=time=>PAD_L+(time-minT)/spanT*(W-PAD_L-PAD_R);
-  const y=value=>H-PAD_B-(value-minV)/spanV*(H-PAD_T-PAD_B);
-  const svgRoot=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%',class:'series-svg',role:'img','aria-label':`Time series for ${name}`});
-  svgRoot.append(svgEl('line',{x1:PAD_L,y1:H-PAD_B,x2:W-PAD_R,y2:H-PAD_B,class:'axis'}));
-  svgRoot.append(svgEl('line',{x1:PAD_L,y1:PAD_T,x2:PAD_L,y2:H-PAD_B,class:'axis'}));
-  [maxV,(minV+maxV)/2,minV].forEach(value=>{
-    const label=svgEl('text',{x:String(PAD_L-6),y:String(y(value)+3),class:'axis-label','text-anchor':'end'});
-    label.textContent=fmt(value);svgRoot.append(label);
-    svgRoot.append(svgEl('line',{x1:PAD_L,y1:y(value),x2:W-PAD_R,y2:y(value),class:'grid'}));});
-  for(let time=minT;time<=maxT;time++){
-    const label=svgEl('text',{x:String(x(time)),y:String(H-8),class:'axis-label','text-anchor':'middle'});
-    label.textContent=`t${time}`;svgRoot.append(label);}
-  series.forEach(item=>{
-    const path=svgEl('path',{d:`M ${item.points.map(point=>`${x(point.time)},${y(point.value)}`).join(' L ')}`,
-      fill:'none',stroke:item.color,'stroke-width':'2','stroke-linejoin':'round'});
-    const title=svgEl('title');title.textContent=`${item.scenario.name}\n${item.points.map(point=>`t${point.time}: ${fmt(point.value)}`).join('\n')}`;
-    path.append(title);svgRoot.append(path);
-    item.points.forEach(point=>svgRoot.append(svgEl('circle',{cx:x(point.time),cy:y(point.value),r:'2.6',fill:item.color})));
+  const heading=document.createElement('h3');
+  heading.textContent=unit?`${name.replaceAll('_',' ')} — ${unit}`:name.replaceAll('_',' ');
+  section.append(heading);
+  const lines=[];
+  scenarios.forEach((scenario,index)=>{
+    const start=typeof initial[name]==='number'?[{time:0,value:initial[name]}]:[];
+    const points=[...start,...(scenario.snapshots||[]).filter(snap=>typeof snap.variables?.[name]==='number')
+      .map(snap=>({time:snap.time,value:snap.variables[name]}))];
+    const values=(scenario.forecast?.projections||{})[name]||[];
+    // One recorded point is nothing to draw on its own, but it is the anchor a projection continues
+    // from — a compound driver index is exactly that: one entered level, then geometric periods.
+    if(points.length<2&&!values.length)return;
+    const at=projectionStart??points[points.length-1].time+1;
+    lines.push({key:`scenario:${scenario.scenario_id||index}`,name:scenario.name,scenario,
+      note:scenario.chartNote||null,
+      color:seriesColor(index),points,projected:values.map((value,step)=>({time:at+step,value}))});
   });
-  section.append(svgRoot);
-  const legend=document.createElement('div');legend.className='legend';
-  series.forEach(item=>{const entry=document.createElement('span');entry.className='legend-item';entry.title=item.scenario.name;
-    const swatch=document.createElement('i');swatch.className='swatch-dot';swatch.style.background=item.color;
-    entry.append(swatch,document.createTextNode(`${item.scenario.scenario_id}: ${shortName(item.scenario)}`));legend.append(entry);});
-  section.append(legend);
+  (options.fitted||[]).forEach((item,index)=>{
+    if((item.points||[]).length<2)return;
+    lines.push({key:item.key||`fitted:${index}`,name:item.name||'Fitted trend',style:'fitted',
+      note:item.note||null,
+      color:item.color||seriesColor(index),points:item.points,projected:[]});
+  });
+  if(!lines.length){
+    section.classList.add('is-empty');
+    section.append(note(options.emptyNote||'This variable was not numeric in the recorded snapshots.'));
+    return section;
+  }
+  const periods=Math.max(0,...lines.map(line=>line.projected.length));
+  // A declared level, e.g. the target peak a user entered, drawn across the chart so the projected
+  // line can be seen reaching or passing it. It is an assumption, so it never looks like a series.
+  const marks=(options.valueLines||[]).filter(item=>Number.isFinite(Number(item.value)));
+  const hidden=new Set();
+  let selected=null;
+  const holder=document.createElement('div');
+  const tip=document.createElement('div');tip.className='chart-tip';tip.setAttribute('aria-hidden','true');
+  section.append(holder,tip);
+
+  function pointInfo(line,point,isProjected){
+    return {name:line.name,scenario_id:line.scenario?.scenario_id||null,time:point.time,value:point.value,
+      projected:isProjected,unit,periodWord};
+  }
+  function showTip(circle,line,point,isProjected){
+    const info=pointInfo(line,point,isProjected);
+    tip.replaceChildren();
+    tip.append(Object.assign(document.createElement('b'),{textContent:line.name}));
+    tip.append(document.createTextNode(`t${point.time}: ${fmt(point.value)}${unit?` ${unit}`:''}`));
+    tip.append(Object.assign(document.createElement('span'),
+      {textContent:isProjected?(options.projectedNote||'Projected value — not observed')
+        :line.note||(line.style==='fitted'?'Fitted value — a model line, not an observation':'Recorded value')}));
+    const box=holder.getBoundingClientRect(),frame=section.getBoundingClientRect();
+    const scale=box.width/W;
+    const left=Math.min(Math.max(6,box.left-frame.left+Number(circle.getAttribute('cx'))*scale-40),
+      Math.max(6,frame.width-190));
+    tip.style.left=`${left}px`;
+    tip.style.top=`${Math.max(6,box.top-frame.top+Number(circle.getAttribute('cy'))*scale-58)}px`;
+    tip.classList.add('is-on');
+  }
+  function hideTip(){tip.classList.remove('is-on');}
+
+  function draw(){
+    holder.replaceChildren();hideTip();
+    const shown=lines.filter(line=>!hidden.has(line.key));
+    const all=shown.flatMap(line=>[...line.points,...line.projected]);
+    const axis=document.createElement('div');
+    if(!shown.length){
+      axis.className='muted';axis.textContent='Every series is hidden — choose a legend entry to show it again.';
+      holder.append(axis);drawLegend();return;
+    }
+    const times=shown.flatMap(line=>line.points.map(point=>point.time));
+    const values=[...shown.flatMap(line=>[...line.points,...line.projected].map(point=>point.value)),
+      ...marks.map(item=>Number(item.value))];
+    const minT=Math.min(...times),maxT=Math.max(...times);
+    const maxProjected=Math.max(maxT,...shown.flatMap(line=>line.projected.map(point=>point.time)));
+    let minV=Math.min(...values),maxV=Math.max(...values);
+    if(minV===maxV){minV-=1;maxV+=1;}
+    const spanT=Math.max(maxProjected-minT,1),spanV=maxV-minV;
+    const x=time=>PAD_L+(time-minT)/spanT*(W-PAD_L-PAD_R);
+    const y=value=>H-PAD_B-(value-minV)/spanV*(H-PAD_T-PAD_B);
+    const svgRoot=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,width:'100%',class:'series-svg',role:'img',
+      'aria-label':`Time series for ${name}${unit?` in ${unit}`:''}. The table above lists every value.`});
+    svgRoot.append(svgEl('line',{x1:PAD_L,y1:H-PAD_B,x2:W-PAD_R,y2:H-PAD_B,class:'axis'}));
+    svgRoot.append(svgEl('line',{x1:PAD_L,y1:PAD_T,x2:PAD_L,y2:H-PAD_B,class:'axis'}));
+    [maxV,(minV+maxV)/2,minV].forEach(value=>{
+      const label=svgEl('text',{x:String(PAD_L-6),y:String(y(value)+3),class:'axis-label','text-anchor':'end'});
+      label.textContent=fmt(value);svgRoot.append(label);
+      svgRoot.append(svgEl('line',{x1:PAD_L,y1:y(value),x2:W-PAD_R,y2:y(value),class:'grid'}));});
+    for(let time=minT;time<=maxProjected;time++){
+      const label=svgEl('text',{x:String(x(time)),y:String(H-8),class:`axis-label${time>maxT?' is-projected':''}`,
+        'text-anchor':'middle'});
+      label.textContent=`t${time}`;svgRoot.append(label);}
+    (options.annotations||[]).forEach(item=>{
+      if(item.time<minT||item.time>maxProjected)return;
+      svgRoot.append(svgEl('line',{x1:x(item.time),y1:PAD_T,x2:x(item.time),y2:H-PAD_B,class:'marker'}));
+      const text=svgEl('text',{x:String(x(item.time)+4),y:String(H-PAD_B-6),class:'marker-label'});
+      text.textContent=item.label;svgRoot.append(text);});
+    if(periods){
+      svgRoot.append(svgEl('line',{x1:x(maxT),y1:PAD_T,x2:x(maxT),y2:H-PAD_B,class:'horizon'}));
+      const marker=svgEl('text',{x:String(x(maxT)-4),y:String(PAD_T+9),class:'horizon-label','text-anchor':'end'});
+      marker.textContent=horizonWord;svgRoot.append(marker);}
+    const hits=[];
+    shown.forEach(line=>{
+      const klass=line.style==='fitted'?'fitted':null;
+      const path=svgEl('path',{d:`M ${line.points.map(point=>`${x(point.time)},${y(point.value)}`).join(' L ')}`,
+        fill:'none',stroke:line.color,'stroke-width':'2','stroke-linejoin':'round',class:klass||undefined});
+      svgRoot.append(path);
+      if(klass)line.points.forEach(point=>hits.push({line,point,projected:false}));
+      else line.points.forEach(point=>{
+        svgRoot.append(svgEl('circle',{cx:x(point.time),cy:y(point.value),r:'2.6',fill:line.color}));
+        hits.push({line,point,projected:false});});
+      if(!line.projected.length)return;
+      const last=line.points[line.points.length-1];
+      /* Only bridge to the recorded line when the projection really starts on the next period;
+         otherwise the gap between the history and the horizon stays on screen. */
+      const points=(line.projected[0].time===last.time+1?[last]:[]).concat(line.projected);
+      svgRoot.append(svgEl('path',{class:'projection',d:`M ${points.map(point=>`${x(point.time)},${y(point.value)}`).join(' L ')}`,
+        fill:'none',stroke:line.color,'stroke-width':'2','stroke-linejoin':'round'}));
+      line.projected.forEach(point=>{
+        svgRoot.append(svgEl('circle',{cx:x(point.time),cy:y(point.value),r:'2.6',
+          fill:'var(--surface)',stroke:line.color,'stroke-width':'1.4'}));
+        hits.push({line,point,projected:true});});
+    });
+    marks.forEach(item=>{
+      const value=Number(item.value);
+      svgRoot.append(svgEl('line',{x1:PAD_L,y1:y(value),x2:W-PAD_R,y2:y(value),class:'value-line'}));
+      const label=svgEl('text',{x:String(W-PAD_R-2),y:String(y(value)-4),class:'value-label','text-anchor':'end'});
+      label.textContent=item.label?`${item.label} ${fmt(value)}`:fmt(value);svgRoot.append(label);});
+    hits.forEach(item=>{
+      const circle=svgEl('circle',{cx:x(item.point.time),cy:y(item.point.value),r:'8',class:'chart-hit'});
+      if(selected&&selected.time===item.point.time&&selected.name===item.line.name)circle.classList.add('is-active');
+      circle.addEventListener('pointerenter',()=>showTip(circle,item.line,item.point,item.projected));
+      circle.addEventListener('pointerleave',hideTip);
+      circle.addEventListener('click',()=>{
+        selected=item.projected?null:{time:item.point.time,name:item.line.name};
+        draw();
+        if(options.onSelect)options.onSelect(pointInfo(item.line,item.point,item.projected));});
+      svgRoot.append(circle);});
+    holder.append(svgRoot);
+    heading.querySelectorAll('.chart-style').forEach(node=>node.remove());
+    if(periods){const styleNote=document.createElement('span');styleNote.className='chart-style';
+      styleNote.textContent=` · dashed = ${caption}`;heading.append(styleNote);}
+    drawLegend();
+  }
+
+  function drawLegend(){
+    const legend=holder.querySelector('.legend')||document.createElement('div');
+    legend.className='legend';legend.replaceChildren();
+    /* A scenario id is a key, not a name. It earns its place in a run comparison, where the reader
+       must map a line back to the scenario table; a standalone panel sets scenarioKeys:false
+       because its lines are already named. */
+    const showKeys=options.scenarioKeys!==false;
+    lines.forEach(line=>{
+      const entry=document.createElement('button');
+      entry.type='button';entry.className='legend-item';
+      entry.setAttribute('aria-pressed',hidden.has(line.key)?'false':'true');
+      if(hidden.has(line.key))entry.classList.add('is-off');
+      entry.title=line.scenario?line.scenario.name:line.name;
+      const swatch=document.createElement('i');swatch.className='swatch-dot';
+      swatch.style.background=line.color;
+      if(line.style==='fitted')swatch.classList.add('swatch-ring');
+      const label=`${showKeys&&line.scenario?`${line.scenario.scenario_id}: `:''}${shortName(line.scenario||{name:line.name})}`;
+      /* The suffix says the line is a model line, not a record — a name that already says
+         "fitted" needs no second one, which used to print "Fitted trend line (fitted line)". */
+      entry.append(swatch,document.createTextNode(
+        line.style==='fitted'&&!/fitted/i.test(label)?`${label} (fitted line)`:label));
+      entry.onclick=()=>{hidden.has(line.key)?hidden.delete(line.key):hidden.add(line.key);draw();};
+      legend.append(entry);});
+    holder.append(legend);
+  }
+
+  draw();
+  section.chartLines=lines;
   return section;
 }
 

@@ -29,3 +29,7 @@ Thumbs.db
 # Local scratch
 *.log
 tmp/
+
+# Local snapshots and shell accidents — never published
+lifescience_decision_engine.zip
+/python

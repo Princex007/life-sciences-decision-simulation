@@ -14,6 +14,7 @@ from typing import Any
 from app.agents.cognition import DecisionResponse
 from app.domain.definitions import SimulationDefinition
 from app.evaluation.compare_hybrid_rule_based import DeterministicRulePolicy
+from app.evaluation.objective_scorer import selection_diagnostics
 from app.forecasting.launch_forecast import LaunchForecast
 from app.forecasting.registry import ForecastRegistry
 from app.simulation.engine import SimulationEngine
@@ -45,31 +46,6 @@ class PayerBranchPolicy(DeterministicRulePolicy):
                     alternative_actions=["favorable_access"],
                     rationale="Evaluation-only branch over two feasible Payer choices.")
         return super().decide(context, actions)
-
-
-def _selection_diagnostics(decision, objective: dict[str, Any] | None) -> dict[str, Any]:
-    scores = decision.decision_context.objective_scores or {}
-    ranked = sorted(scores.items(), key=lambda item: (-item[1]["score"], item[0]))
-    highest = ranked[0] if ranked else None
-    runner_up = ranked[1] if len(ranked) > 1 else None
-    margin = (highest[1]["score"] - runner_up[1]["score"]
-              if highest and runner_up else None)
-    tolerance = objective.get("score_tie_tolerance") if objective else None
-    source = decision.decision_source
-    return {
-        "highest_scoring_feasible_action": highest[0] if highest else None,
-        "highest_score": highest[1]["score"] if highest else None,
-        "runner_up_action": runner_up[0] if runner_up else None,
-        "runner_up_score": runner_up[1]["score"] if runner_up else None,
-        "score_margin": margin,
-        "tie_tolerance": tolerance,
-        "selected_action": decision.action.action_id if decision.action else None,
-        "decision_source": source,
-        "decisive": source == "objective_scorer",
-        "fallback_dependent": bool(objective) and source != "objective_scorer",
-        "objective_scores": {action_id: value["score"]
-                              for action_id, value in scores.items()},
-    }
 
 
 def _run_one(scenario: dict[str, Any], changes: dict[str, list[float]] | None = None) -> dict[str, Any]:
@@ -109,7 +85,7 @@ def _run_one(scenario: dict[str, Any], changes: dict[str, list[float]] | None = 
         "sources": {entry.agent_id: entry.decision_source for entry in decisions},
         "payer_scores": decisions[2].decision_context.objective_scores,
         "payer_margin": decisions[2].objective_score_margin,
-        "payer_selection": _selection_diagnostics(decisions[2], payer_objective),
+        "payer_selection": selection_diagnostics(decisions[2], payer_objective),
         "final_state": {name: terminal.final_state.get(name) for name in (
             "payer_access", "market_share", "competitor_market_share",
             "physician_adoption", "patient_adherence_rate")},
@@ -133,7 +109,7 @@ def _terminal_summary(scenario, payer_objective) -> dict[str, Any]:
                  if entry.event_type == "decision" and entry.action]
     payer_decision = next(entry for entry in decisions if entry.agent_id == "payer")
     return {
-        "payer": _selection_diagnostics(payer_decision, payer_objective),
+        "payer": selection_diagnostics(payer_decision, payer_objective),
         "action_sequence": [{"agent": item.agent_id, "action": item.action.action_id,
                              "source": item.decision_source,
                              "validation": item.validation_status}

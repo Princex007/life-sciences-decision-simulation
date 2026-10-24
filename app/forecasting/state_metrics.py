@@ -4,7 +4,8 @@ from app.domain.world import WorldState
 
 class StateMetricsForecast:
     """Return final numeric variables as metrics, without domain assumptions."""
-    def forecast(self, final_state: WorldState, snapshots: list[WorldState], scenario) -> Outcome:
+    def forecast(self, final_state: WorldState, snapshots: list[WorldState], scenario,
+                 context=None) -> Outcome:
         metrics = {key: value for key, value in final_state.as_variables().items()
                    if isinstance(value, (int, float)) and not isinstance(value, bool)}
         metrics["time"] = final_state.time
